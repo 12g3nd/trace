@@ -3,6 +3,8 @@
   import TaskList from '$lib/components/TaskList.svelte';
   import CaptureInput from '$lib/components/CaptureInput.svelte';
   import SearchOverlay from '$lib/components/SearchOverlay.svelte';
+  import CommandPalette from '$lib/components/CommandPalette.svelte';
+  import SettingsModal from '$lib/components/SettingsModal.svelte';
   import UndoToast from '$lib/components/UndoToast.svelte';
   import Header from '$lib/components/Header.svelte';
   import {
@@ -27,6 +29,8 @@
 
   let captureRef: CaptureInput;
   let editingId: string | null = null;
+  let commandPaletteActive = false;
+  let settingsActive = false;
 
   onMount(() => {
     // Focus capture input on initial load
@@ -36,6 +40,8 @@
     listen('summon', () => {
       clearSelection();
       searchActive.set(false);
+      commandPaletteActive = false;
+      settingsActive = false;
       editingId = null;
       captureRef?.focus();
     }).then((cleanup) => {
@@ -50,6 +56,32 @@
   });
 
   async function handleKeydown(e: KeyboardEvent) {
+    // Command palette: Ctrl+K
+    if (e.ctrlKey && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      commandPaletteActive = !commandPaletteActive;
+      if (commandPaletteActive) {
+        searchActive.set(false);
+        settingsActive = false;
+      }
+      return;
+    }
+
+    // Don't intercept other keys if modals are open
+    if (commandPaletteActive) {
+      if (e.key === 'Escape') {
+        commandPaletteActive = false;
+      }
+      return;
+    }
+
+    if (settingsActive) {
+      if (e.key === 'Escape') {
+        settingsActive = false;
+      }
+      return;
+    }
+
     // Don't intercept when typing in an input/editing
     const tag = (e.target as HTMLElement)?.tagName;
     const isInput = tag === 'INPUT' || tag === 'TEXTAREA';
@@ -185,7 +217,7 @@
 <svelte:window on:keydown={handleKeydown} />
 
 <div class="app-shell">
-  <Header />
+  <Header on:openSettings={() => (settingsActive = true)} />
 
   <div class="task-area">
     <TaskList
@@ -202,6 +234,20 @@
 
   {#if $searchActive}
     <SearchOverlay on:close={() => searchActive.set(false)} />
+  {/if}
+
+  {#if commandPaletteActive}
+    <CommandPalette
+      on:close={() => (commandPaletteActive = false)}
+      on:openSettings={() => {
+        commandPaletteActive = false;
+        settingsActive = true;
+      }}
+    />
+  {/if}
+
+  {#if settingsActive}
+    <SettingsModal on:close={() => (settingsActive = false)} />
   {/if}
 </div>
 
