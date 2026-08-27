@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import TaskList from '$lib/components/TaskList.svelte';
   import CaptureInput from '$lib/components/CaptureInput.svelte';
   import SearchOverlay from '$lib/components/SearchOverlay.svelte';
@@ -21,11 +22,34 @@
     performUndo,
   } from '$lib/stores';
   import { get } from 'svelte/store';
+  import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
 
   let captureRef: CaptureInput;
   let editingId: string | null = null;
 
-  function handleKeydown(e: KeyboardEvent) {
+  onMount(() => {
+    // Focus capture input on initial load
+    setTimeout(() => captureRef?.focus(), 50);
+
+    let unlisten: (() => void) | undefined;
+    listen('summon', () => {
+      clearSelection();
+      searchActive.set(false);
+      editingId = null;
+      captureRef?.focus();
+    }).then((cleanup) => {
+      unlisten = cleanup;
+    }).catch(() => {
+      // Fallback if not running in Tauri webview
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  });
+
+  async function handleKeydown(e: KeyboardEvent) {
     // Don't intercept when typing in an input/editing
     const tag = (e.target as HTMLElement)?.tagName;
     const isInput = tag === 'INPUT' || tag === 'TEXTAREA';
@@ -39,7 +63,16 @@
         editingId = null;
         return;
       }
-      clearSelection();
+      if (get(selectedId)) {
+        clearSelection();
+        return;
+      }
+      // If in idle state, Escape dismisses the window cleanly
+      try {
+        await invoke('hide_window');
+      } catch {
+        // Fallback for non-Tauri dev
+      }
       return;
     }
 
