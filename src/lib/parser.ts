@@ -1,22 +1,25 @@
 import type { ParsedInput } from './types';
+import { parseNaturalDate } from './date-parser';
 
 /**
  * Parse raw capture input into structured task fields.
  *
  * Syntax (all parts optional except task text):
- *   "Do the thing ~ context ***"
+ *   "Do the thing tomorrow ~ context ***"
  *
  * - Text after the last " ~ " becomes the context.
  * - Trailing asterisks set priority (capped at 5).
+ * - Natural language dates are extracted into due_at.
  * - If parsing extracts nothing useful, the full input becomes task text.
  */
 export function parseInput(raw: string): ParsedInput {
   let text = raw.trim();
   let context: string | null = null;
   let priority = 0;
+  let due_at: string | null = null;
 
   if (!text) {
-    return { text: '', context: null, priority: 0 };
+    return { text: '', context: null, priority: 0, due_at: null };
   }
 
   // Extract context: split on the last " ~ " occurrence.
@@ -53,5 +56,12 @@ export function parseInput(raw: string): ParsedInput {
     }
   }
 
-  return { text, context, priority };
+  // Extract natural language date from remaining text
+  const dateResult = parseNaturalDate(text);
+  if (dateResult.dueAt) {
+    text = dateResult.cleanedText;
+    due_at = dateResult.dueAt;
+  }
+
+  return { text, context, priority, due_at };
 }

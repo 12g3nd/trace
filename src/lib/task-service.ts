@@ -14,10 +14,10 @@ export async function captureTask(rawInput: string, status: Status = 'now'): Pro
   const parsed = parseInput(trimmed);
   if (!parsed.text) {
     // Even if parsing produced no structured text, store the raw input as-is.
-    return db.createTask(trimmed, trimmed, null, 0, status);
+    return db.createTask(trimmed, trimmed, null, 0, status, null);
   }
 
-  return db.createTask(parsed.text, trimmed, parsed.context, parsed.priority, status);
+  return db.createTask(parsed.text, trimmed, parsed.context, parsed.priority, status, parsed.due_at ?? null);
 }
 
 export async function editTask(
@@ -29,6 +29,7 @@ export async function editTask(
     text: parsed.text || newRawInput.trim(),
     context: parsed.context,
     priority: parsed.priority,
+    due_at: parsed.due_at ?? null,
   });
 }
 

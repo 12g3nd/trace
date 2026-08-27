@@ -2,7 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import type { Task } from '$lib/types';
   import { selectedId, complete, uncomplete, edit } from '$lib/stores';
-  import { parseInput } from '$lib/parser';
+  import { formatRelativeDue } from '$lib/date-parser';
 
   export let task: Task;
   export let editing = false;
@@ -15,6 +15,7 @@
   $: selected = $selectedId === task.id;
   $: isDone = task.status === 'done';
   $: priorityLevel = task.priority;
+  $: dueBadge = formatRelativeDue(task.due_at);
 
   function handleCheck(e: Event) {
     e.stopPropagation();
@@ -120,6 +121,9 @@
       <span class="task-text">{task.text}</span>
       {#if task.context}
         <span class="task-context">{task.context}</span>
+      {/if}
+      {#if dueBadge}
+        <span class="task-due" class:overdue={dueBadge.isOverdue}>{dueBadge.label}</span>
       {/if}
     {/if}
   </div>
@@ -227,6 +231,23 @@
     color: var(--on-text-quiet);
     letter-spacing: 0.02em;
     white-space: nowrap;
+  }
+
+  .task-due {
+    font-family: var(--on-font-mono);
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--on-surface-raised);
+    color: var(--on-text-secondary);
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
+  .task-due.overdue {
+    background: rgba(255, 100, 124, 0.15);
+    color: var(--on-priority-5);
+    border: 1px solid rgba(255, 100, 124, 0.3);
   }
 
   .priority-stars {

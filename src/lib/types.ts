@@ -18,6 +18,7 @@ export interface ParsedInput {
   text: string;
   context: string | null;
   priority: number;
+  due_at?: string | null;
 }
 
 /** Status labels in display order. */

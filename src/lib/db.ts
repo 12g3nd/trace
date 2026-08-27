@@ -116,7 +116,8 @@ export async function createTask(
   rawInput: string | null,
   context: string | null,
   priority: number,
-  status: Status = 'now'
+  status: Status = 'now',
+  dueAt: string | null = null
 ): Promise<Task> {
   const d = getDb();
   const id = generateId();
@@ -124,9 +125,9 @@ export async function createTask(
   const order = await nextSortOrder(status);
 
   await d.execute(
-    `INSERT INTO tasks (id, text, raw_input, status, context, priority, created_at, updated_at, sort_order)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [id, text, rawInput, status, context, priority, now, now, order]
+    `INSERT INTO tasks (id, text, raw_input, status, context, priority, due_at, created_at, updated_at, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [id, text, rawInput, status, context, priority, dueAt, now, now, order]
   );
 
   return {
@@ -136,7 +137,7 @@ export async function createTask(
     status,
     context,
     priority,
-    due_at: null,
+    due_at: dueAt,
     created_at: now,
     updated_at: now,
     completed_at: null,
@@ -146,7 +147,7 @@ export async function createTask(
 
 export async function updateTask(
   id: string,
-  fields: Partial<Pick<Task, 'text' | 'context' | 'priority' | 'status' | 'sort_order'>>
+  fields: Partial<Pick<Task, 'text' | 'context' | 'priority' | 'status' | 'sort_order' | 'due_at'>>
 ): Promise<void> {
   const d = getDb();
   const sets: string[] = [];

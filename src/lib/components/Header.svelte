@@ -1,8 +1,27 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import { taskCounts, nowTasks } from '$lib/stores';
+  import { invoke } from '@tauri-apps/api/core';
 
   const dispatch = createEventDispatcher();
+
+  let pinned = false;
+
+  onMount(async () => {
+    try {
+      pinned = await invoke<boolean>('get_always_on_top');
+    } catch {
+      // Fallback
+    }
+  });
+
+  async function togglePin() {
+    try {
+      pinned = await invoke<boolean>('toggle_always_on_top');
+    } catch {
+      pinned = !pinned;
+    }
+  }
 
   const now = new Date();
   const days = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -19,7 +38,16 @@
       <span class="counter-total">{$taskCounts.now + $taskCounts.later + $taskCounts.someday}</span>
     </span>
     <button
-      class="settings-btn"
+      class="icon-btn"
+      class:active={pinned}
+      on:click={togglePin}
+      aria-label="Toggle pin always on top"
+      title={pinned ? 'Unpin from top' : 'Pin always on top'}
+    >
+      📌
+    </button>
+    <button
+      class="icon-btn"
       on:click={() => dispatch('openSettings')}
       aria-label="Open settings"
       title="Settings & Commands"
@@ -41,7 +69,7 @@
   .header-right {
     display: flex;
     align-items: center;
-    gap: var(--on-space-3);
+    gap: var(--on-space-2);
   }
 
   .date {
@@ -57,6 +85,7 @@
     font-size: 11px;
     font-variant-numeric: tabular-nums;
     color: var(--on-text-quiet);
+    margin-right: var(--on-space-1);
   }
 
   .counter-sep {
@@ -64,20 +93,26 @@
     opacity: 0.5;
   }
 
-  .settings-btn {
-    font-size: 12px;
+  .icon-btn {
+    font-size: 11px;
     color: var(--on-text-quiet);
-    opacity: 0.7;
+    opacity: 0.6;
     transition: opacity var(--on-duration-fast) var(--on-ease), color var(--on-duration-fast) var(--on-ease);
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2px;
+    padding: 3px 5px;
     border-radius: var(--on-radius-sm);
   }
 
-  .settings-btn:hover {
+  .icon-btn:hover {
     opacity: 1;
     color: var(--on-text);
+  }
+
+  .icon-btn.active {
+    opacity: 1;
+    color: var(--on-accent);
+    background: var(--on-accent-subtle);
   }
 </style>

@@ -8,6 +8,7 @@ describe('Task Input Parser', () => {
       text: 'Cancel DigitalOcean',
       context: null,
       priority: 0,
+      due_at: null,
     });
   });
 
@@ -17,6 +18,7 @@ describe('Task Input Parser', () => {
       text: 'Fallow algo',
       context: 'chatgpt',
       priority: 0,
+      due_at: null,
     });
   });
 
@@ -26,6 +28,7 @@ describe('Task Input Parser', () => {
       text: 'Write "What\'s a God to a Non-believer" blog',
       context: 'chatgpt',
       priority: 5,
+      due_at: null,
     });
   });
 
@@ -35,16 +38,16 @@ describe('Task Input Parser', () => {
       text: 'Respond to Hamza dad',
       context: null,
       priority: 5,
+      due_at: null,
     });
   });
 
-  it('parses task with 2-star priority and context', () => {
+  it('parses task with 2-star priority, context, and natural date', () => {
     const result = parseInput('Email Edwin tomorrow ~ FI99 **');
-    expect(result).toEqual({
-      text: 'Email Edwin tomorrow',
-      context: 'fi99',
-      priority: 2,
-    });
+    expect(result.text).toBe('Email Edwin');
+    expect(result.context).toBe('fi99');
+    expect(result.priority).toBe(2);
+    expect(result.due_at).not.toBeNull();
   });
 
   it('caps priority at 5 even if more asterisks are provided', () => {
@@ -53,6 +56,7 @@ describe('Task Input Parser', () => {
       text: 'Super urgent task',
       context: 'critical',
       priority: 5,
+      due_at: null,
     });
   });
 
@@ -61,11 +65,13 @@ describe('Task Input Parser', () => {
       text: '',
       context: null,
       priority: 0,
+      due_at: null,
     });
     expect(parseInput('   ')).toEqual({
       text: '',
       context: null,
       priority: 0,
+      due_at: null,
     });
   });
 
@@ -75,6 +81,7 @@ describe('Task Input Parser', () => {
       text: 'Review ~ chapter 1',
       context: 'book',
       priority: 0,
+      due_at: null,
     });
   });
 
@@ -84,6 +91,7 @@ describe('Task Input Parser', () => {
       text: 'Important item',
       context: null,
       priority: 3,
+      due_at: null,
     });
   });
 
@@ -93,6 +101,7 @@ describe('Task Input Parser', () => {
       text: 'Fix Lacquer Clipping',
       context: 'lacquerapp',
       priority: 0,
+      due_at: null,
     });
   });
 });

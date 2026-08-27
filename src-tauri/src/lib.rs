@@ -11,6 +11,19 @@ fn hide_window(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
 
+#[tauri::command]
+fn toggle_always_on_top(window: tauri::WebviewWindow) -> Result<bool, String> {
+    let current = window.is_always_on_top().map_err(|e| e.to_string())?;
+    let new_state = !current;
+    window.set_always_on_top(new_state).map_err(|e| e.to_string())?;
+    Ok(new_state)
+}
+
+#[tauri::command]
+fn get_always_on_top(window: tauri::WebviewWindow) -> Result<bool, String> {
+    window.is_always_on_top().map_err(|e| e.to_string())
+}
+
 fn toggle_window(window: &tauri::WebviewWindow) {
     if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
         let _ = window.hide();
@@ -42,7 +55,11 @@ pub fn run() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![hide_window])
+        .invoke_handler(tauri::generate_handler![
+            hide_window,
+            toggle_always_on_top,
+            get_always_on_top
+        ])
         .setup(|app| {
             // Register default global shortcuts (Win+Shift+T and Alt+Shift+T fallback)
             let global_shortcut = app.global_shortcut();
