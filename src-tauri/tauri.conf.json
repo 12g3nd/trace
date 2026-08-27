@@ -40,9 +40,7 @@
   },
   "plugins": {
     "sql": {
-      "preload": {
-        "db": "sqlite:drift.db"
-      }
+      "preload": ["sqlite:drift.db"]
     }
   }
 }

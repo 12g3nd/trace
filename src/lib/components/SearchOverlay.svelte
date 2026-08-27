@@ -37,7 +37,7 @@
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
-<div class="search-overlay" role="dialog" aria-label="Search tasks" on:click|self={() => dispatch('close')}>
+<div class="search-overlay" role="dialog" aria-modal="true" aria-label="Search tasks" tabindex="-1" on:click|self={() => dispatch('close')}>
   <div class="search-panel">
     <div class="search-bar">
       <span class="search-icon" aria-hidden="true">/</span>
@@ -58,6 +58,7 @@
           <button
             class="search-result"
             role="option"
+            aria-selected="false"
             on:click={() => selectTask(task)}
           >
             <span class="result-text">{task.text}</span>
