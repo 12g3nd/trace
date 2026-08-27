@@ -19,11 +19,12 @@ A personal task capture tool that preserves the speed of writing into a text fil
 ## Capture syntax
 
 ```
-Message Michael about RC ~ rc **
+Message Michael about RC tomorrow ~ rc **
 ```
 
 - Text before `~` → task description
-- Text after `~` → context (lowercase tag)
+- Natural language dates → `today`, `tomorrow`, `in 3 days`, `friday`, `due:2026-09-01`
+- Text after `~` → context tag (normalized to lowercase)
 - Trailing `*` → priority (1–5)
 
 All parts are optional. Typing plain text and pressing Enter works.
@@ -32,16 +33,34 @@ All parts are optional. Typing plain text and pressing Enter works.
 
 | Key | Action |
 |---|---|
+| `Win+Shift+T` / `Alt+Shift+T` | Global summon / dismiss from anywhere in Windows |
+| `Ctrl+K` | Command Palette (export, settings, clear done) |
 | `↑` / `↓` or `j` / `k` | Move selection |
 | `Space` | Complete / uncomplete task |
-| `Enter` | Edit selected task |
+| `Enter` | Edit selected task inline |
 | `Tab` | Focus capture input |
-| `/` | Search |
+| `/` | Search tasks |
 | `Alt+↑` / `Alt+↓` | Reorder task within group |
 | `Ctrl+1` / `2` / `3` | Move to Now / Later / Someday |
-| `Delete` | Delete task (undoable) |
+| `Delete` | Delete task (with 6s undo toast) |
 | `Ctrl+Z` | Undo last action |
-| `Escape` | Close overlay / cancel edit / deselect |
+| `Escape` | Close dialog / cancel edit / clear selection / dismiss window |
+
+## CLI Companion
+
+Drift includes a standalone CLI companion for instant capture from your terminal:
+
+```powershell
+.\cli\drift.ps1 add "Review RC ~ rc **"
+.\cli\drift.ps1 list
+```
+
+## Data Portability & Export
+
+Press `Ctrl+K` to export tasks at any time:
+- **`TODO.txt`** — standard plain text format with `(A)` priority notation and `~context` tags.
+- **`JSON`** — full structured schema backup with timestamps.
+- **`CSV`** — spreadsheet-compatible format.
 
 ## Development
 
@@ -57,7 +76,7 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
-Produces a `.msi` installer and standalone `.exe` in `src-tauri/target/release/bundle/`.
+Produces a standalone `.exe` and `.msi` installer in `C:\Users\SJ\.cargo-target\release\`.
 
 ## Data location
 
@@ -66,8 +85,6 @@ SQLite database is stored in the Tauri app data directory:
 ```
 %APPDATA%/com.orbitnoir.drift/drift.db
 ```
-
-The database is a standard SQLite file and can be opened with any SQLite tool.
 
 ## Design system
 
