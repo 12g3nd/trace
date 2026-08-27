@@ -1,0 +1,83 @@
+/*
+ * Orbit Noir / Utility — token layer.
+ *
+ * Derived from the established Orbit Noir system (Lacquer DESIGN.md §3, §5, §6).
+ * This utility is the quietest expression of Orbit Noir: mostly deep surface,
+ * minimal accent, functional color only. No emotional palette, no album reactivity.
+ *
+ * Prefix: --on- (Orbit Noir).
+ *
+ * If a shared Orbit Noir token package is later extracted, these declarations
+ * become re-exports. Nothing downstream references raw hex values directly.
+ */
+
+:root {
+  /* ── Palette · from DESIGN.md §3.1 ──────────────────────────────────────── */
+  --on-orbit:      #0b1731;
+  --on-atlantic:   #102a4c;
+  --on-ion:        #4f7dff;
+  --on-signal:     #39d4d0;
+  --on-ultraviolet:#8a63f6;
+  --on-solar:      #ff9654;
+  --on-flare:      #ff647c;
+  --on-milkglass:  #e8eff5;
+  --on-moondust:   #a8b8ca;
+
+  /* ── Semantic surfaces ──────────────────────────────────────────────────── */
+  --on-bg:              var(--on-orbit);
+  --on-surface:         var(--on-atlantic);
+  --on-surface-raised:  #173a6a;
+  --on-surface-inset:   #081328;
+
+  /* ── Semantic text ──────────────────────────────────────────────────────── */
+  --on-text:            var(--on-milkglass);
+  --on-text-secondary:  var(--on-moondust);
+  --on-text-quiet:      #5a7194;
+
+  /* ── Functional accent · Ion = focus/selection, Signal = completion ────── */
+  --on-accent:          var(--on-ion);
+  --on-accent-subtle:   rgba(79, 125, 255, 0.10);
+  --on-accent-secondary:var(--on-signal);
+  --on-danger:          var(--on-flare);
+
+  /* ── Priority markers · from quiet to warm ──────────────────────────────  */
+  --on-priority-1:      var(--on-moondust);
+  --on-priority-2:      #7a9cc7;
+  --on-priority-3:      var(--on-ion);
+  --on-priority-4:      var(--on-solar);
+  --on-priority-5:      var(--on-flare);
+
+  /* ── Chrome / hairlines ─────────────────────────────────────────────────  */
+  --on-hairline:        rgba(232, 239, 245, 0.10);
+  --on-hairline-strong: rgba(232, 239, 245, 0.20);
+
+  /* ── Typography · DESIGN.md §5 ─────────────────────────────────────────  */
+  --on-font-interface:  'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --on-font-graphic:    'Space Grotesk', 'Inter', system-ui, sans-serif;
+  --on-font-mono:       'IBM Plex Mono', ui-monospace, 'Cascadia Code', monospace;
+
+  /* ── Spacing · 4px base ─────────────────────────────────────────────────  */
+  --on-space-1:  4px;
+  --on-space-2:  8px;
+  --on-space-3:  12px;
+  --on-space-4:  16px;
+  --on-space-5:  24px;
+  --on-space-6:  32px;
+  --on-space-8:  48px;
+
+  /* ── Radius · restrained ────────────────────────────────────────────────  */
+  --on-radius-sm: 4px;
+  --on-radius-md: 6px;
+
+  /* ── Motion · DESIGN.md §6 ─────────────────────────────────────────────  */
+  --on-duration-fast:    150ms;
+  --on-duration-normal:  300ms;
+  --on-ease:             cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --on-duration-fast:   0ms;
+    --on-duration-normal: 0ms;
+  }
+}
