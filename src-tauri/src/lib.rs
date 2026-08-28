@@ -1,5 +1,6 @@
 use std::str::FromStr;
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
@@ -75,9 +76,14 @@ pub fn run() {
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
-            if let Some(icon) = app.default_window_icon() {
-                let _tray = TrayIconBuilder::new()
-                    .icon(icon.clone())
+            let icon_bytes = include_bytes!("../icons/32x32.png");
+            let icon = Image::from_bytes(icon_bytes)
+                .ok()
+                .or_else(|| app.default_window_icon().cloned());
+
+            if let Some(tray_icon) = icon {
+                let _tray = TrayIconBuilder::with_id("tray")
+                    .icon(tray_icon)
                     .menu(&menu)
                     .show_menu_on_left_click(false)
                     .tooltip("Trace")
