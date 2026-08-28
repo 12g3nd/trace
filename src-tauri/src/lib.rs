@@ -1,6 +1,5 @@
 use std::str::FromStr;
 use tauri::{
-    image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
@@ -62,60 +61,61 @@ pub fn run() {
             get_always_on_top
         ])
         .setup(|app| {
-            // Register default global shortcuts (Win+Shift+T and Alt+Shift+T fallback)
-            let global_shortcut = app.global_shortcut();
-            if let Ok(s1) = Shortcut::from_str("super+shift+t") {
-                let _ = global_shortcut.register(s1);
-            }
-            if let Ok(s2) = Shortcut::from_str("alt+shift+t") {
-                let _ = global_shortcut.register(s2);
+            // Explicitly show and focus the main window on startup so it appears immediately
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
             }
 
-            // Build system tray
+            // Register global shortcuts (Alt+Shift+T, Ctrl+Shift+Space, Super+Shift+T fallback)
+            let global_shortcut = app.global_shortcut();
+            let shortcuts = ["alt+shift+t", "ctrl+shift+space", "super+shift+t", "ctrl+alt+t"];
+            for s in shortcuts {
+                if let Ok(shortcut) = Shortcut::from_str(s) {
+                    let _ = global_shortcut.register(shortcut);
+                }
+            }
+
+            // Build system tray using tauri::include_image!
             let show_item = MenuItem::with_id(app, "show", "Open Trace", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
-            let icon_bytes = include_bytes!("../icons/32x32.png");
-            let icon = Image::from_bytes(icon_bytes)
-                .ok()
-                .or_else(|| app.default_window_icon().cloned());
+            let tray_builder = TrayIconBuilder::with_id("tray")
+                .icon(tauri::include_image!("icons/icon.ico"))
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .tooltip("Trace")
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                            let _ = window.emit("summon", ());
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            toggle_window(&window);
+                        }
+                    }
+                });
 
-            if let Some(tray_icon) = icon {
-                let _tray = TrayIconBuilder::with_id("tray")
-                    .icon(tray_icon)
-                    .menu(&menu)
-                    .show_menu_on_left_click(false)
-                    .tooltip("Trace")
-                    .on_menu_event(|app, event| match event.id().as_ref() {
-                        "show" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.unminimize();
-                                let _ = window.set_focus();
-                                let _ = window.emit("summon", ());
-                            }
-                        }
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } = event
-                        {
-                            let app = tray.app_handle();
-                            if let Some(window) = app.get_webview_window("main") {
-                                toggle_window(&window);
-                            }
-                        }
-                    })
-                    .build(app)?;
-            }
+            let _ = tray_builder.build(app);
 
             Ok(())
         })

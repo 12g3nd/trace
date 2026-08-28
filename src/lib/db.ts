@@ -147,7 +147,7 @@ export async function createTask(
 
 export async function updateTask(
   id: string,
-  fields: Partial<Pick<Task, 'text' | 'context' | 'priority' | 'status' | 'sort_order' | 'due_at'>>
+  fields: Partial<Pick<Task, 'text' | 'raw_input' | 'context' | 'priority' | 'status' | 'sort_order' | 'due_at'>>
 ): Promise<void> {
   const d = getDb();
   const sets: string[] = [];
@@ -173,24 +173,24 @@ export async function updateTask(
   );
 }
 
-export async function completeTask(id: string): Promise<void> {
+export async function moveTask(id: string, newStatus: Status): Promise<void> {
   const d = getDb();
   const now = isoNow();
-  const order = await nextSortOrder('done');
+  const order = await nextSortOrder(newStatus);
+  const completedAt = newStatus === 'done' ? now : null;
+
   await d.execute(
-    `UPDATE tasks SET status = 'done', completed_at = $1, updated_at = $2, sort_order = $3 WHERE id = $4`,
-    [now, now, order, id]
+    `UPDATE tasks SET status = $1, completed_at = $2, updated_at = $3, sort_order = $4 WHERE id = $5`,
+    [newStatus, completedAt, now, order, id]
   );
 }
 
+export async function completeTask(id: string): Promise<void> {
+  await moveTask(id, 'done');
+}
+
 export async function uncompleteTask(id: string, restoreStatus: Status = 'now'): Promise<void> {
-  const d = getDb();
-  const now = isoNow();
-  const order = await nextSortOrder(restoreStatus);
-  await d.execute(
-    `UPDATE tasks SET status = $1, completed_at = NULL, updated_at = $2, sort_order = $3 WHERE id = $4`,
-    [restoreStatus, now, order, id]
-  );
+  await moveTask(id, restoreStatus);
 }
 
 export async function deleteTask(id: string): Promise<void> {

@@ -24,9 +24,11 @@ export async function editTask(
   id: string,
   newRawInput: string
 ): Promise<void> {
-  const parsed = parseInput(newRawInput.trim());
+  const trimmed = newRawInput.trim();
+  const parsed = parseInput(trimmed);
   await db.updateTask(id, {
-    text: parsed.text || newRawInput.trim(),
+    raw_input: trimmed,
+    text: parsed.text || trimmed,
     context: parsed.context,
     priority: parsed.priority,
     due_at: parsed.due_at ?? null,
@@ -42,11 +44,7 @@ export async function uncompleteTask(id: string, restoreTo: Status = 'now'): Pro
 }
 
 export async function moveTask(id: string, newStatus: Status): Promise<void> {
-  if (newStatus === 'done') {
-    await db.completeTask(id);
-  } else {
-    await db.updateTask(id, { status: newStatus });
-  }
+  await db.moveTask(id, newStatus);
 }
 
 export async function deleteTask(id: string): Promise<void> {
