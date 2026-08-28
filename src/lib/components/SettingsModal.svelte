@@ -61,7 +61,7 @@
 <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Settings" tabindex="-1" on:click|self={() => dispatch('close')}>
   <div class="modal-panel">
     <div class="modal-header">
-      <span class="modal-title">DRIFT UTILITY</span>
+      <span class="modal-title">TRACE</span>
       <button class="close-btn" on:click={() => dispatch('close')} aria-label="Close settings">✕</button>
     </div>
 

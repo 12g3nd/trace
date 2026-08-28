@@ -5,7 +5,7 @@ let db: Database | null = null;
 
 /** Connect to the SQLite database and run migrations. */
 export async function initDb(): Promise<void> {
-  db = await Database.load('sqlite:drift.db');
+  db = await Database.load('sqlite:trace.db');
   await migrate();
 }
 

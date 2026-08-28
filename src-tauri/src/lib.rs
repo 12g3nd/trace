@@ -71,7 +71,7 @@ pub fn run() {
             }
 
             // Build system tray
-            let show_item = MenuItem::with_id(app, "show", "Open Drift", true, None::<&str>)?;
+            let show_item = MenuItem::with_id(app, "show", "Open Trace", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
@@ -80,7 +80,7 @@ pub fn run() {
                     .icon(icon.clone())
                     .menu(&menu)
                     .show_menu_on_left_click(false)
-                    .tooltip("Drift — TODO Utility")
+                    .tooltip("Trace")
                     .on_menu_event(|app, event| match event.id().as_ref() {
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
@@ -120,5 +120,5 @@ pub fn run() {
             }
         })
         .run(tauri::generate_context!())
-        .expect("failed to start Drift");
+        .expect("failed to start Trace");
 }

@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Drift CLI Companion for PowerShell
+    Trace CLI Companion for PowerShell
 .DESCRIPTION
-    Capture and list tasks directly from the terminal into Drift.
+    Capture and list tasks directly from the terminal into Trace.
 .EXAMPLE
-    .\drift.ps1 add "Review RC ~ rc **"
-    .\drift.ps1 list
+    .\trace.ps1 add "Review RC ~ rc **"
+    .\trace.ps1 list
 #>
 
 param(
@@ -17,27 +17,27 @@ param(
 )
 
 $TaskText = $Arguments -join " "
-$AppDataDir = [System.IO.Path]::Combine($env:APPDATA, "com.orbitnoir.drift")
-$DbPath = [System.IO.Path]::Combine($AppDataDir, "drift.db")
+$AppDataDir = [System.IO.Path]::Combine($env:APPDATA, "com.orbitnoir.trace")
+$DbPath = [System.IO.Path]::Combine($AppDataDir, "trace.db")
 
 switch ($Command.ToLower()) {
     "add" {
         if (-not $TaskText) {
-            Write-Host "Usage: drift add '<task text> ~ <context> <stars>'" -ForegroundColor Yellow
+            Write-Host "Usage: trace add '<task text> ~ <context> <stars>'" -ForegroundColor Yellow
             exit 1
         }
         Write-Host "✓ Stored task: $TaskText" -ForegroundColor Cyan
         Write-Host "  Database: $DbPath" -ForegroundColor DarkGray
     }
     "list" {
-        Write-Host "DRIFT — Active Queue" -ForegroundColor Cyan
+        Write-Host "TRACE — Active Queue" -ForegroundColor Cyan
         Write-Host "Database: $DbPath" -ForegroundColor DarkGray
     }
     "status" {
-        Write-Host "DRIFT — Status" -ForegroundColor Cyan
+        Write-Host "TRACE — Status" -ForegroundColor Cyan
         Write-Host "Database: $DbPath" -ForegroundColor DarkGray
     }
     default {
-        Write-Host "Drift CLI Commands: add, list, status, help" -ForegroundColor Cyan
+        Write-Host "Trace CLI Commands: add, list, status, help" -ForegroundColor Cyan
     }
 }

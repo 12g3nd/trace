@@ -1,91 +1,89 @@
-# Drift
+# Trace
 
-A TODO.txt replacement. Orbit Noir utility.
+A personal TODO.txt replacement for Windows 11.
 
-Fast capture. Local storage. Keyboard-first. Extremely small.
+I built Trace to replace the plain `TODO.txt` scratchpad I kept open in Notepad. It keeps the instant, zero-friction feel of typing a line of text into a text file, but adds local SQLite storage, keyboard reordering, priority tags, and a global summon hotkey.
 
-## What this is
+It is tailored for my personal machine and the Orbit Noir desktop theme (matching Lacquer and my terminal setup).
 
-A personal task capture tool that preserves the speed of writing into a text file while adding safe persistence, structure, and recovery. Not a productivity app.
+---
 
-## Stack
+## How I use it
 
-- **Tauri 2** — native Windows shell, ~5MB binary
-- **Svelte 5** — reactive UI, compiles away
-- **SQLite** — local database, human-inspectable
-- **TypeScript** — type-safe frontend
-- **Orbit Noir** — personal design system (shared with Lacquer, launcher, terminal)
+Press **`Win+Shift+T`** (or **`Alt+Shift+T`**) anywhere on Windows. The window pops up with the cursor already focused. Type a task, press Enter, and press Escape to dismiss.
 
-## Capture syntax
-
-```
+```text
 Message Michael about RC tomorrow ~ rc **
 ```
 
-- Text before `~` → task description
-- Natural language dates → `today`, `tomorrow`, `in 3 days`, `friday`, `due:2026-09-01`
-- Text after `~` → context tag (normalized to lowercase)
-- Trailing `*` → priority (1–5)
+- **Task text**: Everything before `~`
+- **Due date**: Parsed naturally (`today`, `tomorrow`, `in 3 days`, `friday`, `due:2026-09-01`)
+- **Context tag**: After `~` (normalized to lowercase)
+- **Priority**: Trailing asterisks `*` through `*****` (1 to 5)
 
-All parts are optional. Typing plain text and pressing Enter works.
+Plain text with no special syntax also works.
 
-## Keyboard shortcuts
+---
+
+## Keybindings
 
 | Key | Action |
 |---|---|
-| `Win+Shift+T` / `Alt+Shift+T` | Global summon / dismiss from anywhere in Windows |
-| `Ctrl+K` | Command Palette (export, settings, clear done) |
+| `Win+Shift+T` / `Alt+Shift+T` | Summon or hide Trace from anywhere in Windows |
+| `Ctrl+K` | Command Palette (export, clear completed, settings) |
 | `↑` / `↓` or `j` / `k` | Move selection |
-| `Space` | Complete / uncomplete task |
+| `Space` | Toggle task completion |
 | `Enter` | Edit selected task inline |
-| `Tab` | Focus capture input |
-| `/` | Search tasks |
-| `Alt+↑` / `Alt+↓` | Reorder task within group |
-| `Ctrl+1` / `2` / `3` | Move to Now / Later / Someday |
-| `Delete` | Delete task (with 6s undo toast) |
+| `Tab` | Jump to capture input |
+| `/` | Filter / search tasks |
+| `Alt+↑` / `Alt+↓` | Reorder task within its section |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Move task to Now / Later / Someday |
+| `Delete` / `Backspace` | Delete task (6-second undo toast) |
 | `Ctrl+Z` | Undo last action |
-| `Escape` | Close dialog / cancel edit / clear selection / dismiss window |
+| `Escape` | Close dialog, cancel edit, or dismiss window |
 
-## CLI Companion
+---
 
-Drift includes a standalone CLI companion for instant capture from your terminal:
+## CLI
+
+A small PowerShell script is included in `cli/` for adding tasks straight from the terminal:
 
 ```powershell
-.\cli\drift.ps1 add "Review RC ~ rc **"
-.\cli\drift.ps1 list
+.\cli\trace.ps1 add "Review RC ~ rc **"
+.\cli\trace.ps1 list
 ```
 
-## Data Portability & Export
+---
 
-Press `Ctrl+K` to export tasks at any time:
-- **`TODO.txt`** — standard plain text format with `(A)` priority notation and `~context` tags.
-- **`JSON`** — full structured schema backup with timestamps.
-- **`CSV`** — spreadsheet-compatible format.
+## Exporting Data
+
+Press `Ctrl+K` to export anytime:
+- **`TODO.txt`** — standard plain text with `(A)` priority notation and `~context`
+- **`JSON`** — full schema dump with timestamps
+- **`CSV`** — spreadsheet format
+
+---
+
+## Database Location
+
+All data is stored locally in SQLite:
+
+```text
+%APPDATA%/com.orbitnoir.trace/trace.db
+```
+
+---
 
 ## Development
 
 ```powershell
-# Prerequisites: Rust, Node.js 20+, pnpm
 pnpm install
 pnpm tauri dev
 ```
 
-## Build
+Run tests and typechecks:
 
 ```powershell
-pnpm tauri build
+pnpm vitest run
+pnpm check
 ```
-
-Produces a standalone `.exe` and `.msi` installer in `C:\Users\SJ\.cargo-target\release\`.
-
-## Data location
-
-SQLite database is stored in the Tauri app data directory:
-
-```
-%APPDATA%/com.orbitnoir.drift/drift.db
-```
-
-## Design system
-
-See [ORBIT_NOIR_INTEGRATION.md](./ORBIT_NOIR_INTEGRATION.md) for how this utility inherits from the Orbit Noir design system.
