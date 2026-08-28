@@ -138,6 +138,50 @@
 
     const sel = get(selectedId);
 
+    // Alt+Arrow for reordering selected task within its group
+    if (e.altKey && sel) {
+      const all = get(visibleTasks);
+      const task = all.find((t) => t.id === sel);
+      if (task) {
+        let statusTasks: typeof all;
+        if (task.status === 'now') statusTasks = get(nowTasks);
+        else if (task.status === 'later') statusTasks = get(laterTasks);
+        else if (task.status === 'someday') statusTasks = get(somedayTasks);
+        else statusTasks = [];
+
+        const statusIdx = statusTasks.findIndex((t) => t.id === sel);
+
+        if (e.key === 'ArrowUp' && statusIdx > 0) {
+          e.preventDefault();
+          reorder(statusTasks, statusIdx, statusIdx - 1);
+          return;
+        } else if (e.key === 'ArrowDown' && statusIdx >= 0 && statusIdx < statusTasks.length - 1) {
+          e.preventDefault();
+          reorder(statusTasks, statusIdx, statusIdx + 1);
+          return;
+        }
+      }
+    }
+
+    // Ctrl+1 / Ctrl+2 / Ctrl+3: move task status
+    if (e.ctrlKey && sel) {
+      if (e.key === '1' || e.code === 'Digit1') {
+        e.preventDefault();
+        move(sel, 'now');
+        return;
+      }
+      if (e.key === '2' || e.code === 'Digit2') {
+        e.preventDefault();
+        move(sel, 'later');
+        return;
+      }
+      if (e.key === '3' || e.code === 'Digit3') {
+        e.preventDefault();
+        move(sel, 'someday');
+        return;
+      }
+    }
+
     switch (e.key) {
       case 'ArrowDown':
       case 'j':
@@ -170,40 +214,6 @@
         if (sel) {
           e.preventDefault();
           remove(sel);
-        }
-        break;
-      case '1':
-        if (e.ctrlKey && sel) { e.preventDefault(); move(sel, 'now'); }
-        break;
-      case '2':
-        if (e.ctrlKey && sel) { e.preventDefault(); move(sel, 'later'); }
-        break;
-      case '3':
-        if (e.ctrlKey && sel) { e.preventDefault(); move(sel, 'someday'); }
-        break;
-      default:
-        // Alt+Arrow for reorder
-        if (e.altKey && sel) {
-          const visible = get(visibleTasks);
-          const idx = visible.findIndex((t) => t.id === sel);
-          if (idx === -1) break;
-
-          // Determine which status group the task is in
-          const task = visible[idx];
-          let statusTasks: typeof visible;
-          if (task.status === 'now') statusTasks = get(nowTasks);
-          else if (task.status === 'later') statusTasks = get(laterTasks);
-          else statusTasks = get(somedayTasks);
-
-          const statusIdx = statusTasks.findIndex((t) => t.id === sel);
-
-          if (e.key === 'ArrowUp' && statusIdx > 0) {
-            e.preventDefault();
-            reorder(statusTasks, statusIdx, statusIdx - 1);
-          } else if (e.key === 'ArrowDown' && statusIdx < statusTasks.length - 1) {
-            e.preventDefault();
-            reorder(statusTasks, statusIdx, statusIdx + 1);
-          }
         }
         break;
     }

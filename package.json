@@ -1,5 +1,5 @@
 {
-  "name": "drift",
+  "name": "trace",
   "version": "0.1.0",
   "private": true,
   "description": "Orbit Noir TODO utility. A better TODO.txt.",
@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
     "tauri": "tauri"
   },
   "license": "MIT",

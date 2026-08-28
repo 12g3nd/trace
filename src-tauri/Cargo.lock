@@ -4338,20 +4338,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tauri-app"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
- "tauri-plugin-sql",
-]
-
-[[package]]
 name = "tauri-build"
 version = "2.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4920,6 +4906,20 @@ name = "tower-service"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
+
+[[package]]
+name = "trace"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+ "tauri-plugin-sql",
+]
 
 [[package]]
 name = "tracing"

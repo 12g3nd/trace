@@ -93,7 +93,7 @@
       <div class="section">
         <div class="section-title">KEYBOARD SHORTCUTS</div>
         <div class="shortcuts-grid">
-          <div class="shortcut-row"><kbd>Win+Shift+T</kbd><span>Global summon / hide</span></div>
+          <div class="shortcut-row"><kbd>Alt+Shift+T / Win+Shift+T</kbd><span>Global summon / hide</span></div>
           <div class="shortcut-row"><kbd>Ctrl+K</kbd><span>Command palette</span></div>
           <div class="shortcut-row"><kbd>/</kbd><span>Search tasks</span></div>
           <div class="shortcut-row"><kbd>Tab</kbd><span>Focus capture input</span></div>

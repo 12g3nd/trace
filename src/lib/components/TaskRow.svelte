@@ -17,6 +17,8 @@
   $: priorityLevel = task.priority;
   $: dueBadge = formatRelativeDue(task.due_at);
 
+  let wasEditing = false;
+
   function handleCheck(e: Event) {
     e.stopPropagation();
     if (isDone) {
@@ -37,20 +39,25 @@
   function startEdit() {
     editText = task.raw_input || task.text + (task.context ? ` ~ ${task.context}` : '') + (task.priority ? ' ' + '*'.repeat(task.priority) : '');
     editing = true;
-    // Focus after mount
+    wasEditing = true;
     requestAnimationFrame(() => editInput?.focus());
   }
 
   async function commitEdit() {
-    if (editText.trim()) {
-      await edit(task.id, editText);
+    const trimmed = editText.trim();
+    if (trimmed && trimmed !== task.raw_input) {
+      await edit(task.id, trimmed);
     }
     editing = false;
+    wasEditing = false;
+    editText = '';
     dispatch('editDone');
   }
 
   function cancelEdit() {
     editing = false;
+    wasEditing = false;
+    editText = '';
     dispatch('editDone');
   }
 
@@ -65,8 +72,11 @@
   }
 
   // Trigger edit mode when parent sets editing=true
-  $: if (editing && !editText) {
+  $: if (editing && !wasEditing) {
     startEdit();
+  } else if (!editing && wasEditing) {
+    wasEditing = false;
+    editText = '';
   }
 </script>
 

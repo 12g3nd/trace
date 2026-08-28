@@ -1,10 +1,23 @@
 use std::str::FromStr;
+use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct ShortcutStatus {
+    pub shortcut: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Default)]
+pub struct AppState {
+    pub shortcuts: Mutex<Vec<ShortcutStatus>>,
+}
 
 #[tauri::command]
 fn hide_window(window: tauri::WebviewWindow) {
@@ -24,6 +37,11 @@ fn get_always_on_top(window: tauri::WebviewWindow) -> Result<bool, String> {
     window.is_always_on_top().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_shortcut_diagnostics(state: tauri::State<AppState>) -> Vec<ShortcutStatus> {
+    state.shortcuts.lock().map(|s| s.clone()).unwrap_or_default()
+}
+
 fn toggle_window(window: &tauri::WebviewWindow) {
     if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
         let _ = window.hide();
@@ -38,6 +56,7 @@ fn toggle_window(window: &tauri::WebviewWindow) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(AppState::default())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
@@ -58,26 +77,65 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             hide_window,
             toggle_always_on_top,
-            get_always_on_top
+            get_always_on_top,
+            get_shortcut_diagnostics
         ])
         .setup(|app| {
-            // Explicitly show and focus the main window on startup so it appears immediately
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            let args: Vec<String> = std::env::args().collect();
+            let start_minimized = args.iter().any(|arg| {
+                arg == "--minimized" || arg == "--hidden" || arg == "-m"
+            });
 
-            // Register global shortcuts (Alt+Shift+T, Ctrl+Shift+Space, Super+Shift+T fallback)
-            let global_shortcut = app.global_shortcut();
-            let shortcuts = ["alt+shift+t", "ctrl+shift+space", "super+shift+t", "ctrl+alt+t"];
-            for s in shortcuts {
-                if let Ok(shortcut) = Shortcut::from_str(s) {
-                    let _ = global_shortcut.register(shortcut);
+            if !start_minimized {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
                 }
             }
 
-            // Build system tray using tauri::include_image!
+            let global_shortcut = app.global_shortcut();
+            let shortcuts = ["alt+shift+t", "super+shift+t", "ctrl+shift+space", "ctrl+alt+t"];
+            let mut statuses = Vec::new();
+
+            for s in shortcuts {
+                match Shortcut::from_str(s) {
+                    Ok(shortcut) => {
+                        match global_shortcut.register(shortcut) {
+                            Ok(_) => {
+                                statuses.push(ShortcutStatus {
+                                    shortcut: s.to_string(),
+                                    success: true,
+                                    error: None,
+                                });
+                            }
+                            Err(e) => {
+                                eprintln!("[Trace] Failed to register global shortcut {}: {}", s, e);
+                                statuses.push(ShortcutStatus {
+                                    shortcut: s.to_string(),
+                                    success: false,
+                                    error: Some(e.to_string()),
+                                });
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[Trace] Invalid shortcut syntax {}: {}", s, e);
+                        statuses.push(ShortcutStatus {
+                            shortcut: s.to_string(),
+                            success: false,
+                            error: Some(e.to_string()),
+                        });
+                    }
+                }
+            }
+
+            if let Some(state) = app.try_state::<AppState>() {
+                if let Ok(mut guard) = state.shortcuts.lock() {
+                    *guard = statuses;
+                }
+            }
+
             let show_item = MenuItem::with_id(app, "show", "Open Trace", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
