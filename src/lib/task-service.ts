@@ -51,6 +51,11 @@ export async function deleteTask(id: string): Promise<void> {
   await db.deleteTask(id);
 }
 
+/** Re-insert a full task snapshot (used by delete-undo). */
+export async function restoreTask(task: Task): Promise<void> {
+  await db.restoreTask(task);
+}
+
 export async function loadAllTasks(): Promise<Task[]> {
   return db.getAllTasks();
 }

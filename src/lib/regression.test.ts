@@ -1,204 +1,182 @@
-import { describe, it, expect } from 'vitest';
-import { parseInput } from './parser';
-import type { Task, Status } from './types';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as db from './db';
+import * as taskService from './task-service';
+import type { Task } from './types';
 
-// Mock in-memory task store simulating the DB and service layer logic
-class MockTaskStore {
-  tasks: Task[] = [];
+vi.mock('./db', () => ({
+  createTask: vi.fn(),
+  updateTask: vi.fn(),
+  moveTask: vi.fn(),
+  completeTask: vi.fn(),
+  uncompleteTask: vi.fn(),
+  deleteTask: vi.fn(),
+  reorderTask: vi.fn(),
+  restoreTask: vi.fn(),
+  getAllTasks: vi.fn(),
+  getTasksByStatus: vi.fn(),
+  searchTasks: vi.fn(),
+}));
 
-  private nextSortOrder(status: Status): number {
-    const matching = this.tasks.filter((t) => t.status === status);
-    if (matching.length === 0) return 1;
-    const max = Math.max(...matching.map((t) => t.sort_order));
-    return max + 1;
-  }
-
-  createTask(rawInput: string, status: Status = 'now'): Task {
-    const trimmed = rawInput.trim();
-    const parsed = parseInput(trimmed);
-    const now = new Date().toISOString();
-    const order = this.nextSortOrder(status);
-
-    const task: Task = {
-      id: Math.random().toString(36).slice(2),
-      text: parsed.text || trimmed,
-      raw_input: trimmed,
-      status,
-      context: parsed.context,
-      priority: parsed.priority,
-      due_at: parsed.due_at ?? null,
-      created_at: now,
-      updated_at: now,
-      completed_at: status === 'done' ? now : null,
-      sort_order: order,
-    };
-
-    this.tasks.push(task);
-    return task;
-  }
-
-  editTask(id: string, newRawInput: string): Task {
-    const task = this.tasks.find((t) => t.id === id);
-    if (!task) throw new Error('Task not found');
-
-    const trimmed = newRawInput.trim();
-    const parsed = parseInput(trimmed);
-    const now = new Date().toISOString();
-
-    task.raw_input = trimmed;
-    task.text = parsed.text || trimmed;
-    task.context = parsed.context;
-    task.priority = parsed.priority;
-    task.due_at = parsed.due_at ?? null;
-    task.updated_at = now;
-
-    return task;
-  }
-
-  moveTask(id: string, newStatus: Status): Task {
-    const task = this.tasks.find((t) => t.id === id);
-    if (!task) throw new Error('Task not found');
-
-    const now = new Date().toISOString();
-    const order = this.nextSortOrder(newStatus);
-    task.status = newStatus;
-    task.sort_order = order;
-    task.completed_at = newStatus === 'done' ? now : null;
-    task.updated_at = now;
-
-    return task;
-  }
-
-  reorder(status: Status, fromIndex: number, toIndex: number): void {
-    const group = this.tasks
-      .filter((t) => t.status === status)
-      .sort((a, b) => a.sort_order - b.sort_order);
-
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
-    if (fromIndex >= group.length || toIndex >= group.length) return;
-
-    const task = group[fromIndex];
-    let newOrder: number;
-
-    if (toIndex === 0) {
-      newOrder = (group[0]?.sort_order ?? 1) - 1;
-    } else if (toIndex >= group.length - 1) {
-      newOrder = (group[group.length - 1]?.sort_order ?? 0) + 1;
-    } else {
-      const before = group[toIndex < fromIndex ? toIndex - 1 : toIndex];
-      const after = group[toIndex < fromIndex ? toIndex : toIndex + 1];
-      newOrder = before && after ? (before.sort_order + after.sort_order) / 2 : toIndex;
-    }
-
-    task.sort_order = newOrder;
-    task.updated_at = new Date().toISOString();
-  }
-}
-
-describe('Raw Input and Edit Consistency (Regression)', () => {
-  it('updates raw_input and parsed fields when editing a task', () => {
-    const store = new MockTaskStore();
-    const task = store.createTask('Message Michael ~ rc **');
-
-    expect(task.text).toBe('Message Michael');
-    expect(task.context).toBe('rc');
-    expect(task.priority).toBe(2);
-    expect(task.raw_input).toBe('Message Michael ~ rc **');
-
-    // Perform edit
-    const updated = store.editTask(task.id, 'Message Edwin ~ work ***');
-
-    expect(updated.raw_input).toBe('Message Edwin ~ work ***');
-    expect(updated.text).toBe('Message Edwin');
-    expect(updated.context).toBe('work');
-    expect(updated.priority).toBe(3);
-
-    // Subsequent edit check
-    const secondEdit = store.editTask(task.id, 'Plain task without meta');
-    expect(secondEdit.raw_input).toBe('Plain task without meta');
-    expect(secondEdit.text).toBe('Plain task without meta');
-    expect(secondEdit.context).toBeNull();
-    expect(secondEdit.priority).toBe(0);
+describe('taskService (Production Hardening Regressions)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('preserves raw_input when editing with special characters', () => {
-    const store = new MockTaskStore();
-    const task = store.createTask('Ship v1.0.0-rc.1 ~ release *');
+  describe('captureTask', () => {
+    it('returns null for blank input without calling database', async () => {
+      const result = await taskService.captureTask('   ');
+      expect(result).toBeNull();
+      expect(db.createTask).not.toHaveBeenCalled();
+    });
 
-    const updated = store.editTask(task.id, 'Ship v1.0.0-final ~ release *****');
-    expect(updated.raw_input).toBe('Ship v1.0.0-final ~ release *****');
-    expect(updated.priority).toBe(5);
-    expect(updated.context).toBe('release');
-  });
-});
+    it('parses input and calls db.createTask with structured fields and raw_input', async () => {
+      const mockCreatedTask: Task = {
+        id: 'abc123',
+        text: 'Deploy service',
+        raw_input: 'Deploy service ~ infra **',
+        status: 'now',
+        context: 'infra',
+        priority: 2,
+        due_at: null,
+        created_at: '2026-08-28T00:00:00.000Z',
+        updated_at: '2026-08-28T00:00:00.000Z',
+        completed_at: null,
+        sort_order: 1,
+      };
+      vi.mocked(db.createTask).mockResolvedValue(mockCreatedTask);
 
-describe('Status Movement and Destination Ordering (Regression)', () => {
-  it('assigns valid sort_order when moving between groups', () => {
-    const store = new MockTaskStore();
-    const task1 = store.createTask('Task 1', 'now');
-    const task2 = store.createTask('Task 2', 'now');
-    const later1 = store.createTask('Later 1', 'later');
+      const res = await taskService.captureTask('Deploy service ~ infra **', 'now');
 
-    expect(later1.sort_order).toBe(1);
+      expect(db.createTask).toHaveBeenCalledWith(
+        'Deploy service',
+        'Deploy service ~ infra **',
+        'infra',
+        2,
+        'now',
+        null
+      );
+      expect(res).toEqual(mockCreatedTask);
+    });
 
-    // Move task1 from 'now' to 'later'
-    const moved = store.moveTask(task1.id, 'later');
-    expect(moved.status).toBe('later');
-    expect(moved.sort_order).toBe(2);
-    expect(moved.completed_at).toBeNull();
-
-    // Move task2 to 'done' (done group is currently empty, next sort_order is 1)
-    const completed = store.moveTask(task2.id, 'done');
-    expect(completed.status).toBe('done');
-    expect(completed.completed_at).not.toBeNull();
-    expect(completed.sort_order).toBe(1);
-
-    // Uncomplete task2 back to 'now'
-    const restored = store.moveTask(task2.id, 'now');
-    expect(restored.status).toBe('now');
-    expect(restored.completed_at).toBeNull();
-    expect(restored.sort_order).toBeGreaterThan(0);
-  });
-
-  it('clears completed_at when moving out of done status', () => {
-    const store = new MockTaskStore();
-    const task = store.createTask('Finish report', 'now');
-
-    store.moveTask(task.id, 'done');
-    expect(task.completed_at).not.toBeNull();
-
-    store.moveTask(task.id, 'someday');
-    expect(task.status).toBe('someday');
-    expect(task.completed_at).toBeNull();
-  });
-});
-
-describe('Reorder Calculations', () => {
-  it('handles reordering in a 3-item list accurately', () => {
-    const store = new MockTaskStore();
-    const t1 = store.createTask('Item 1', 'now'); // sort_order: 1
-    const t2 = store.createTask('Item 2', 'now'); // sort_order: 2
-    const t3 = store.createTask('Item 3', 'now'); // sort_order: 3
-
-    // Move t3 to top (index 2 -> 0)
-    store.reorder('now', 2, 0);
-    expect(t3.sort_order).toBe(0);
-
-    // After reorder, list in order is [t3 (0), t1 (1), t2 (2)]
-    // Move t3 back to bottom (index 0 -> 2)
-    store.reorder('now', 0, 2);
-    expect(t3.sort_order).toBe(3); // (t2.sort_order + 1 = 3)
+    it('handles input where parsing produces no distinct text by using trimmed raw input', async () => {
+      await taskService.captureTask('~infra', 'later');
+      expect(db.createTask).toHaveBeenCalledWith('~infra', '~infra', null, 0, 'later', null);
+    });
   });
 
-  it('safely ignores out of bounds reorder requests', () => {
-    const store = new MockTaskStore();
-    const t1 = store.createTask('Only Item', 'now');
-    const originalOrder = t1.sort_order;
+  describe('editTask', () => {
+    it('updates raw_input, parsed text, context, priority, and due_at in db', async () => {
+      await taskService.editTask('task-1', 'Updated task name ~ work ***');
 
-    store.reorder('now', 0, 5);
-    expect(t1.sort_order).toBe(originalOrder);
+      expect(db.updateTask).toHaveBeenCalledTimes(1);
+      expect(db.updateTask).toHaveBeenCalledWith('task-1', {
+        raw_input: 'Updated task name ~ work ***',
+        text: 'Updated task name',
+        context: 'work',
+        priority: 3,
+        due_at: null,
+      });
+    });
 
-    store.reorder('now', -1, 0);
-    expect(t1.sort_order).toBe(originalOrder);
+    it('clears metadata fields if edited to plain text', async () => {
+      await taskService.editTask('task-1', 'Simple plain text');
+
+      expect(db.updateTask).toHaveBeenCalledWith('task-1', {
+        raw_input: 'Simple plain text',
+        text: 'Simple plain text',
+        context: null,
+        priority: 0,
+        due_at: null,
+      });
+    });
+  });
+
+  describe('restoreTask', () => {
+    it('passes original task snapshot directly to db.restoreTask', async () => {
+      const originalTask: Task = {
+        id: 'orig-id-99',
+        text: 'Important task',
+        raw_input: 'Important task ~p1',
+        status: 'now',
+        context: 'p1',
+        priority: 1,
+        due_at: '2026-08-30T12:00:00.000Z',
+        created_at: '2026-08-27T10:00:00.000Z',
+        updated_at: '2026-08-27T10:00:00.000Z',
+        completed_at: null,
+        sort_order: 3.5,
+      };
+
+      await taskService.restoreTask(originalTask);
+
+      expect(db.restoreTask).toHaveBeenCalledTimes(1);
+      expect(db.restoreTask).toHaveBeenCalledWith(originalTask);
+    });
+  });
+
+  describe('moveTask and completeTask', () => {
+    it('delegates moveTask to db.moveTask with new status', async () => {
+      await taskService.moveTask('task-1', 'someday');
+      expect(db.moveTask).toHaveBeenCalledWith('task-1', 'someday');
+    });
+
+    it('delegates completeTask and uncompleteTask to db', async () => {
+      await taskService.completeTask('task-1');
+      expect(db.completeTask).toHaveBeenCalledWith('task-1');
+
+      await taskService.uncompleteTask('task-1', 'later');
+      expect(db.uncompleteTask).toHaveBeenCalledWith('task-1', 'later');
+    });
+  });
+
+  describe('reorderTasks', () => {
+    const makeTask = (id: string, sort_order: number): Task => ({
+      id,
+      text: `Task ${id}`,
+      raw_input: `Task ${id}`,
+      status: 'now',
+      context: null,
+      priority: 0,
+      due_at: null,
+      created_at: '2026-08-28T00:00:00.000Z',
+      updated_at: '2026-08-28T00:00:00.000Z',
+      completed_at: null,
+      sort_order,
+    });
+
+    it('does nothing if fromIndex equals toIndex or indices are out of bounds', async () => {
+      const list = [makeTask('1', 1), makeTask('2', 2)];
+
+      await taskService.reorderTasks(list, 0, 0);
+      expect(db.reorderTask).not.toHaveBeenCalled();
+
+      await taskService.reorderTasks(list, -1, 1);
+      expect(db.reorderTask).not.toHaveBeenCalled();
+
+      await taskService.reorderTasks(list, 0, 5);
+      expect(db.reorderTask).not.toHaveBeenCalled();
+    });
+
+    it('computes new sort_order when moving to top (toIndex = 0)', async () => {
+      const list = [makeTask('1', 10), makeTask('2', 20), makeTask('3', 30)];
+      // Moving task 3 to index 0: new order should be first.sort_order - 1 = 9
+      await taskService.reorderTasks(list, 2, 0);
+      expect(db.reorderTask).toHaveBeenCalledWith('3', 9);
+    });
+
+    it('computes new sort_order when moving to bottom (toIndex = last)', async () => {
+      const list = [makeTask('1', 10), makeTask('2', 20), makeTask('3', 30)];
+      // Moving task 1 to index 2: new order should be last.sort_order + 1 = 31
+      await taskService.reorderTasks(list, 0, 2);
+      expect(db.reorderTask).toHaveBeenCalledWith('1', 31);
+    });
+
+    it('computes average of neighbor sort_orders when moving between items', async () => {
+      const list = [makeTask('1', 10), makeTask('2', 20), makeTask('3', 30), makeTask('4', 40)];
+      // Moving task 4 (fromIndex 3) up to toIndex 1 (between task 1 and task 2)
+      // before = list[0] (10), after = list[1] (20) -> (10 + 20) / 2 = 15
+      await taskService.reorderTasks(list, 3, 1);
+      expect(db.reorderTask).toHaveBeenCalledWith('4', 15);
+    });
   });
 });

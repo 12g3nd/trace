@@ -148,14 +148,14 @@ export async function remove(id: string) {
   const task = all.find((t) => t.id === id);
   if (!task) return;
 
+  const snapshot = { ...task };
   await taskService.deleteTask(id);
   await refresh();
 
-  // For undo, we re-create the task with original data.
   pushUndo({
-    label: `"${task.text}" deleted`,
+    label: `"${snapshot.text}" deleted`,
     undo: async () => {
-      await taskService.captureTask(task.raw_input || task.text, task.status);
+      await taskService.restoreTask(snapshot);
     },
   });
 }

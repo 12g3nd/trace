@@ -206,6 +206,29 @@ export async function reorderTask(id: string, newOrder: number): Promise<void> {
   );
 }
 
+/** Re-insert a previously deleted task with all its original fields intact. */
+export async function restoreTask(task: Task): Promise<void> {
+  const d = getDb();
+  await d.execute(
+    `INSERT OR REPLACE INTO tasks
+       (id, text, raw_input, status, context, priority, due_at, created_at, updated_at, completed_at, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      task.id,
+      task.text,
+      task.raw_input,
+      task.status,
+      task.context,
+      task.priority,
+      task.due_at,
+      task.created_at,
+      task.updated_at,
+      task.completed_at,
+      task.sort_order,
+    ]
+  );
+}
+
 export async function searchTasks(query: string): Promise<Task[]> {
   const d = getDb();
   const pattern = `%${query}%`;

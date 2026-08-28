@@ -94,31 +94,16 @@ pub fn run() {
                 }
             }
 
+            // Register exactly one global summon shortcut.
+            // Primary: Win+Shift+T. If that fails, fall back to Alt+Shift+T.
             let global_shortcut = app.global_shortcut();
-            let shortcuts = ["alt+shift+t", "super+shift+t", "ctrl+shift+space", "ctrl+alt+t"];
+            let candidates = ["super+shift+t", "alt+shift+t"];
             let mut statuses = Vec::new();
+            let mut registered = false;
 
-            for s in shortcuts {
-                match Shortcut::from_str(s) {
-                    Ok(shortcut) => {
-                        match global_shortcut.register(shortcut) {
-                            Ok(_) => {
-                                statuses.push(ShortcutStatus {
-                                    shortcut: s.to_string(),
-                                    success: true,
-                                    error: None,
-                                });
-                            }
-                            Err(e) => {
-                                eprintln!("[Trace] Failed to register global shortcut {}: {}", s, e);
-                                statuses.push(ShortcutStatus {
-                                    shortcut: s.to_string(),
-                                    success: false,
-                                    error: Some(e.to_string()),
-                                });
-                            }
-                        }
-                    }
+            for s in candidates {
+                let parsed = match Shortcut::from_str(s) {
+                    Ok(sc) => sc,
                     Err(e) => {
                         eprintln!("[Trace] Invalid shortcut syntax {}: {}", s, e);
                         statuses.push(ShortcutStatus {
@@ -126,8 +111,33 @@ pub fn run() {
                             success: false,
                             error: Some(e.to_string()),
                         });
+                        continue;
+                    }
+                };
+
+                match global_shortcut.register(parsed) {
+                    Ok(_) => {
+                        statuses.push(ShortcutStatus {
+                            shortcut: s.to_string(),
+                            success: true,
+                            error: None,
+                        });
+                        registered = true;
+                        break; // one is enough
+                    }
+                    Err(e) => {
+                        eprintln!("[Trace] Failed to register {}: {}", s, e);
+                        statuses.push(ShortcutStatus {
+                            shortcut: s.to_string(),
+                            success: false,
+                            error: Some(e.to_string()),
+                        });
                     }
                 }
+            }
+
+            if !registered {
+                eprintln!("[Trace] No global summon shortcut could be registered");
             }
 
             if let Some(state) = app.try_state::<AppState>() {
@@ -173,7 +183,15 @@ pub fn run() {
                     }
                 });
 
-            let _ = tray_builder.build(app);
+            // If the tray fails, the app could be invisible and unreachable.
+            // Force the window visible as a safety net.
+            if let Err(e) = tray_builder.build(app) {
+                eprintln!("[Trace] Tray icon failed to build: {}", e);
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
 
             Ok(())
         })

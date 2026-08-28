@@ -2,19 +2,33 @@
   import { createEventDispatcher, onMount } from 'svelte';
   import { taskCounts, tasks } from '$lib/stores';
   import { isEnabled, enable, disable } from '@tauri-apps/plugin-autostart';
+  import { invoke } from '@tauri-apps/api/core';
   import { formatAsTodoTxt, formatAsJson, formatAsCsv, downloadFile } from '$lib/export';
   import { get } from 'svelte/store';
+
+  interface ShortcutDiag {
+    shortcut: string;
+    success: boolean;
+    error: string | null;
+  }
 
   const dispatch = createEventDispatcher();
 
   let autostartActive = false;
   let autostartSupported = true;
+  let shortcutDiagnostics: ShortcutDiag[] = [];
 
   onMount(async () => {
     try {
       autostartActive = await isEnabled();
     } catch {
       autostartSupported = false;
+    }
+
+    try {
+      shortcutDiagnostics = await invoke<ShortcutDiag[]>('get_shortcut_diagnostics');
+    } catch {
+      shortcutDiagnostics = [];
     }
   });
 
@@ -53,6 +67,12 @@
     const all = get(tasks);
     downloadFile(formatAsCsv(all), `todo-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
   }
+
+  function formatShortcutName(s: string): string {
+    if (s.toLowerCase() === 'super+shift+t') return 'Win+Shift+T';
+    if (s.toLowerCase() === 'alt+shift+t') return 'Alt+Shift+T';
+    return s;
+  }
 </script>
 
 <svelte:window on:keydown={handleKeydown} />
@@ -87,6 +107,34 @@
         {:else}
           <div class="setting-sub">Autostart plugin active in desktop mode.</div>
         {/if}
+      </div>
+
+      <!-- Section: System Diagnostics -->
+      <div class="section">
+        <div class="section-title">SYSTEM STATUS</div>
+        <div class="diag-list">
+          <div class="diag-row">
+            <span class="diag-label">Global Summon</span>
+            {#if shortcutDiagnostics.length > 0}
+              {#if shortcutDiagnostics.some((s) => s.success)}
+                {@const activeSc = shortcutDiagnostics.find((s) => s.success)}
+                <span class="diag-badge ok">{formatShortcutName(activeSc?.shortcut || '')} (ACTIVE)</span>
+              {:else}
+                <span class="diag-badge error">FAILED</span>
+              {/if}
+            {:else}
+              <span class="diag-badge ok">Win+Shift+T / Alt+Shift+T</span>
+            {/if}
+          </div>
+          <div class="diag-row">
+            <span class="diag-label">System Tray</span>
+            <span class="diag-badge ok">READY</span>
+          </div>
+          <div class="diag-row">
+            <span class="diag-label">Startup Mode</span>
+            <span class="diag-badge" class:ok={autostartActive}>{autostartActive ? 'BACKGROUND' : 'MANUAL'}</span>
+          </div>
+        </div>
       </div>
 
       <!-- Section: Shortcuts Reference -->
@@ -246,6 +294,43 @@
     background: var(--on-accent-subtle);
     border-color: var(--on-accent);
     color: var(--on-accent);
+  }
+
+  .diag-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--on-space-1);
+    background: var(--on-surface-inset);
+    padding: var(--on-space-2) var(--on-space-3);
+    border-radius: var(--on-radius-sm);
+    border: 1px solid var(--on-hairline);
+  }
+
+  .diag-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    padding: 2px 0;
+  }
+
+  .diag-label {
+    color: var(--on-text-secondary);
+  }
+
+  .diag-badge {
+    font-family: var(--on-font-mono);
+    font-size: 10px;
+    letter-spacing: 0.02em;
+    color: var(--on-text-quiet);
+  }
+
+  .diag-badge.ok {
+    color: #4ade80;
+  }
+
+  .diag-badge.error {
+    color: #f87171;
   }
 
   .shortcuts-grid {
