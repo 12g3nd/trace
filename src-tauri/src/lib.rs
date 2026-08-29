@@ -11,6 +11,9 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
+const MAIN_DISMISS_EVENT: &str = "main-dismiss-requested";
+const MAIN_QUIT_EVENT: &str = "main-quit-requested";
+
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct ShortcutStatus {
     pub shortcut: String,
@@ -171,10 +174,21 @@ fn quit_trace(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+fn request_quit(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) && window.emit(MAIN_QUIT_EVENT, ()).is_ok() {
+            return;
+        }
+    }
+
+    app.exit(0);
+}
+
 fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main Trace window is unavailable".to_string())?;
+    sidecar::apply_tool_window_style(&window)?;
     window.show().map_err(|error| error.to_string())?;
     window.unminimize().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
@@ -183,8 +197,9 @@ fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
 
 fn toggle_window(window: &tauri::WebviewWindow) {
     if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
-        let _ = window.hide();
+        let _ = window.emit(MAIN_DISMISS_EVENT, ());
     } else {
+        let _ = sidecar::apply_tool_window_style(window);
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -238,6 +253,7 @@ pub fn run() {
 
             if !start_minimized {
                 if let Some(window) = app.get_webview_window("main") {
+                    let _ = sidecar::apply_tool_window_style(&window);
                     let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
@@ -325,13 +341,15 @@ pub fn run() {
                     eprintln!("[Trace] Failed to toggle Start with Windows: {error}");
                 }
             }
-            "sidecar-quit" => app.exit(0),
+            "sidecar-quit" => request_quit(app),
             _ => {}
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.emit(MAIN_DISMISS_EVENT, ());
+                }
             }
             if window.label() == sidecar::SIDECAR_LABEL
                 && matches!(

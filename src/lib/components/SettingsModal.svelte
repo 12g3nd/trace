@@ -93,7 +93,7 @@
           <div class="setting-row">
             <div class="setting-info">
               <span class="setting-label">Launch at Windows startup</span>
-              <span class="setting-sub">Run quietly in system tray on boot</span>
+              <span class="setting-sub">Run quietly with Sidecar on boot</span>
             </div>
             <button
               class="toggle-btn"
@@ -127,8 +127,8 @@
             {/if}
           </div>
           <div class="diag-row">
-            <span class="diag-label">System Tray</span>
-            <span class="diag-badge ok">READY</span>
+            <span class="diag-label">Shell Affordance</span>
+            <span class="diag-badge ok">SIDECAR</span>
           </div>
           <div class="diag-row">
             <span class="diag-label">Startup Mode</span>

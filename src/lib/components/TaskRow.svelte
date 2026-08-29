@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onDestroy } from 'svelte';
   import type { Task } from '$lib/types';
   import { selectedId, complete, uncomplete, edit } from '$lib/stores';
   import { formatRelativeDue } from '$lib/date-parser';
   import { normalizeTaskLink } from '$lib/url';
   import { openUrl } from '@tauri-apps/plugin-opener';
+  import { createDebouncedSaver } from '$lib/debounced-save';
+  import { registerPendingTaskEdit } from '$lib/pending-edits';
 
   export let task: Task;
   export let editing = false;
@@ -16,6 +18,17 @@
   let linkError: string | null = null;
   let editInput: HTMLInputElement;
   let editPanel: HTMLDivElement;
+  let unregisterPendingEdit: (() => void) | null = null;
+  let finishingEdit = false;
+  let lastSavedText = '';
+  let lastSavedLink: string | null = null;
+
+  interface EditDraft {
+    text: string;
+    link: string;
+  }
+
+  const autosave = createDebouncedSaver<EditDraft>(650, persistDraft);
 
   $: selected = $selectedId === task.id;
   $: isDone = task.status === 'done';
@@ -23,6 +36,11 @@
   $: dueBadge = formatRelativeDue(task.due_at);
 
   let wasEditing = false;
+
+  onDestroy(() => {
+    unregisterPendingEdit?.();
+    void autosave.flush().catch(() => undefined);
+  });
 
   function handleCheck(e: Event) {
     e.stopPropagation();
@@ -42,56 +60,94 @@
   }
 
   function startEdit() {
+    if (wasEditing) return;
     editText = task.raw_input || task.text + (task.context ? ` ~ ${task.context}` : '') + (task.priority ? ' ' + '*'.repeat(task.priority) : '');
     editLink = task.link ?? '';
+    lastSavedText = editText.trim();
+    lastSavedLink = task.link;
     linkError = null;
     editing = true;
     wasEditing = true;
+    unregisterPendingEdit?.();
+    unregisterPendingEdit = registerPendingTaskEdit(autosave.flush);
+    dispatch('editStart', { id: task.id });
     requestAnimationFrame(() => editInput?.focus());
   }
 
-  async function commitEdit() {
-    const trimmed = editText.trim();
-    if (!trimmed) return;
-
-    const normalizedLink = normalizeTaskLink(editLink);
-    if (normalizedLink.error) {
-      linkError = normalizedLink.error;
-      return;
-    }
-
-    await edit(task.id, trimmed, normalizedLink.value);
-    editing = false;
-    wasEditing = false;
-    editText = '';
-    editLink = '';
-    linkError = null;
-    dispatch('editDone');
+  function currentDraft(): EditDraft {
+    return { text: editText, link: editLink };
   }
 
-  function cancelEdit() {
+  function scheduleAutosave() {
+    autosave.schedule(currentDraft());
+  }
+
+  async function persistDraft(draft: EditDraft) {
+    const trimmed = draft.text.trim();
+    if (!trimmed) return;
+
+    const normalizedLink = normalizeTaskLink(draft.link);
+    if (normalizedLink.error) {
+      linkError = normalizedLink.error;
+    } else {
+      linkError = null;
+    }
+
+    // Invalid link text remains visible for correction; valid task text still
+    // autosaves with the last accepted link rather than being lost with it.
+    const linkToSave = normalizedLink.error ? lastSavedLink : normalizedLink.value;
+    if (trimmed === lastSavedText && linkToSave === lastSavedLink) return;
+
+    await edit(task.id, trimmed, linkToSave);
+    lastSavedText = trimmed;
+    lastSavedLink = linkToSave;
+  }
+
+  async function finishEdit(forceClose = false) {
+    if (finishingEdit) return;
+    if (!editText.trim() && !forceClose) return;
+    finishingEdit = true;
+    let saveFailed = false;
+
+    scheduleAutosave();
+    try {
+      await autosave.flush();
+    } catch (error) {
+      console.warn('[Trace] Could not autosave task edit:', error);
+      saveFailed = true;
+    } finally {
+      finishingEdit = false;
+    }
+
+    if (saveFailed) return;
+    if (linkError && !forceClose) return;
+
+    unregisterPendingEdit?.();
+    unregisterPendingEdit = null;
     editing = false;
     wasEditing = false;
     editText = '';
     editLink = '';
     linkError = null;
-    dispatch('editDone');
+    dispatch('editDone', { id: task.id });
   }
 
   function handleEditKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault();
-      commitEdit();
+      e.stopPropagation();
+      void finishEdit();
     } else if (e.key === 'Escape') {
       e.preventDefault();
-      cancelEdit();
+      e.stopPropagation();
+      void finishEdit();
     }
   }
 
   function handleEditorFocusout(e: FocusEvent) {
     const nextTarget = e.relatedTarget;
     if (nextTarget instanceof Node && editPanel?.contains(nextTarget)) return;
-    void commitEdit();
+    void finishEdit();
   }
 
   async function openTaskLink() {
@@ -107,8 +163,7 @@
   $: if (editing && !wasEditing) {
     startEdit();
   } else if (!editing && wasEditing) {
-    wasEditing = false;
-    editText = '';
+    void finishEdit(true);
   }
 </script>
 
@@ -157,6 +212,7 @@
           type="text"
           bind:value={editText}
           bind:this={editInput}
+          on:input={scheduleAutosave}
           on:keydown={handleEditKeydown}
           aria-label="Task"
         />
@@ -168,7 +224,10 @@
             class="link-input"
             type="url"
             bind:value={editLink}
-            on:input={() => (linkError = null)}
+            on:input={() => {
+              linkError = null;
+              scheduleAutosave();
+            }}
             on:keydown={handleEditKeydown}
             placeholder="Link (optional)"
             aria-label="Link (optional)"

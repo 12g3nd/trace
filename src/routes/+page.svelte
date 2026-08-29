@@ -26,18 +26,35 @@
   import { get } from 'svelte/store';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import { flushPendingTaskEdits } from '$lib/pending-edits';
 
   let captureRef: CaptureInput;
   let editingId: string | null = null;
   let commandPaletteActive = false;
   let settingsActive = false;
+  let dismissInFlight = false;
+
+  async function dismissMainWindow() {
+    if (dismissInFlight) return;
+    dismissInFlight = true;
+    try {
+      await flushPendingTaskEdits();
+      editingId = null;
+      await invoke('hide_window');
+    } catch {
+      // Browser development has no native window to hide.
+    } finally {
+      dismissInFlight = false;
+    }
+  }
 
   onMount(() => {
     // Focus capture input on initial load
     setTimeout(() => captureRef?.focus(), 50);
 
-    let unlisten: (() => void) | undefined;
-    listen('summon', () => {
+    const unlisteners: (() => void)[] = [];
+    listen('summon', async () => {
+      await flushPendingTaskEdits();
       clearSelection();
       searchActive.set(false);
       commandPaletteActive = false;
@@ -45,13 +62,30 @@
       editingId = null;
       captureRef?.focus();
     }).then((cleanup) => {
-      unlisten = cleanup;
+      unlisteners.push(cleanup);
+    }).catch(() => {
+      // Fallback if not running in Tauri webview
+    });
+
+    listen('main-dismiss-requested', () => {
+      void dismissMainWindow();
+    }).then((cleanup) => {
+      unlisteners.push(cleanup);
+    }).catch(() => {
+      // Fallback if not running in Tauri webview
+    });
+
+    listen('main-quit-requested', async () => {
+      await flushPendingTaskEdits();
+      await invoke('quit_trace');
+    }).then((cleanup) => {
+      unlisteners.push(cleanup);
     }).catch(() => {
       // Fallback if not running in Tauri webview
     });
 
     return () => {
-      if (unlisten) unlisten();
+      for (const unlisten of unlisteners) unlisten();
     };
   });
 
@@ -100,11 +134,7 @@
         return;
       }
       // If in idle state, Escape dismisses the window cleanly
-      try {
-        await invoke('hide_window');
-      } catch {
-        // Fallback for non-Tauri dev
-      }
+      await dismissMainWindow();
       return;
     }
 
@@ -224,7 +254,10 @@
   }
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window
+  on:keydown={handleKeydown}
+  on:blur={() => void flushPendingTaskEdits().catch(() => undefined)}
+/>
 
 <div class="app-shell">
   <Header on:openSettings={() => (settingsActive = true)} />

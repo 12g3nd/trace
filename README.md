@@ -10,7 +10,7 @@ It is tailored for my personal machine and the Orbit Noir desktop theme (matchin
 
 ## Orbit Sidecar
 
-Trace also runs a compact, always-on-top **Orbit Sidecar** in the bottom-left rail plane of the primary monitor's full physical bounds. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry of its own.
+Trace also runs a compact 288×48, always-on-top **Orbit Sidecar** in the bottom-left rail plane of the primary monitor's full physical bounds. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry. The full Trace window is also treated as a focusable utility palette, so summoning it does not add another taskbar or Alt+Tab presence.
 
 The Sidecar provides:
 
@@ -40,7 +40,7 @@ Message Michael about RC tomorrow ~ rc **
 
 Plain text with no special syntax also works.
 
-Double-click a task (or select it and press Enter) to edit its text and optional web link. Linked tasks show one quiet vector link control that opens through the system default application; links are included in JSON and CSV exports while TODO.txt remains standard.
+Double-click a task (or select it and press Enter) to edit its text and optional web link. Inline edits autosave 650ms after the latest input and flush before blur, hide, close, switching tasks, or quitting, so there is no separate save ritual. Linked tasks show one quiet vector link control that opens through the system default application; links are included in JSON and CSV exports while TODO.txt remains standard.
 
 ---
 
@@ -59,7 +59,7 @@ Double-click a task (or select it and press Enter) to edit its text and optional
 | `Ctrl+1` / `Ctrl+2` / `Ctrl+3` | Move task to Now / Later / Someday |
 | `Delete` / `Backspace` | Delete task (6-second undo toast) |
 | `Ctrl+Z` | Undo last action |
-| `Escape` | Close dialog, cancel edit, or dismiss window |
+| `Escape` | Close dialog, finish an inline edit, or dismiss window |
 
 ---
 
@@ -103,7 +103,7 @@ pnpm tauri dev
 Run tests and typechecks:
 
 ```powershell
-pnpm vitest run
+pnpm exec vitest run
 pnpm check
 cd src-tauri
 cargo check

@@ -14,6 +14,20 @@ describe('Sidecar bay state', () => {
     expect(cycleSidecarBay('trace', -1)).toBe('load');
   });
 
+  it('keeps cycling deterministically across repeated navigation', () => {
+    let forward: 'trace' | 'media' | 'load' = 'trace';
+    for (let index = 0; index < 30; index += 1) {
+      forward = cycleSidecarBay(forward, 1);
+    }
+    expect(forward).toBe('trace');
+
+    let backward: 'trace' | 'media' | 'load' = 'trace';
+    for (let index = 0; index < 30; index += 1) {
+      backward = cycleSidecarBay(backward, -1);
+    }
+    expect(backward).toBe('trace');
+  });
+
   it('persists valid selections and falls back safely for stale values', () => {
     const values = new Map<string, string>();
     const storage = {

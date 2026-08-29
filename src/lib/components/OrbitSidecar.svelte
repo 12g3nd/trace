@@ -341,12 +341,12 @@
     height: 100vh;
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
     padding: 4px;
     overflow: hidden;
     color: var(--on-text);
-    background: rgba(11, 23, 49, 0.86);
-    border: 1px solid rgba(232, 239, 245, 0.13);
+    background: rgba(11, 23, 49, 0.92);
+    border: 1px solid rgba(232, 239, 245, 0.12);
     border-radius: 12px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
     user-select: none;
@@ -355,17 +355,19 @@
   .launcher-group {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 1px;
     flex: 0 0 auto;
   }
 
   button {
     border: 0;
+    -webkit-app-region: no-drag;
+    pointer-events: auto;
   }
 
   .launcher-btn {
     position: relative;
-    width: 30px;
+    width: 28px;
     height: 38px;
     display: grid;
     place-items: center;
@@ -392,8 +394,8 @@
   }
 
   .chatgpt-icon {
-    width: 19px;
-    height: 19px;
+    width: 22px;
+    height: 22px;
     filter: invert(94%) sepia(8%) saturate(258%) hue-rotate(166deg) brightness(101%);
   }
 
@@ -421,12 +423,14 @@
   .divider {
     width: 1px;
     height: 24px;
-    margin: 0 2px;
+    margin: 0 1px;
     flex: 0 0 auto;
     background: rgba(232, 239, 245, 0.13);
   }
 
   .dynamic-bay {
+    position: relative;
+    isolation: isolate;
     min-width: 0;
     height: 38px;
     flex: 1;
@@ -435,9 +439,11 @@
   }
 
   .nav-btn {
-    width: 18px;
-    height: 34px;
-    flex: 0 0 18px;
+    position: relative;
+    z-index: 3;
+    width: 26px;
+    height: 38px;
+    flex: 0 0 26px;
     display: grid;
     place-items: center;
     padding: 0;
@@ -469,7 +475,18 @@
     flex: 1;
   }
 
+  .bay-frame {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
   .bay-page {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    pointer-events: auto;
     animation: bay-in 170ms var(--on-ease);
   }
 
@@ -516,14 +533,14 @@
     height: 38px;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 3px;
     min-width: 0;
   }
 
   .artwork {
-    width: 28px;
-    height: 28px;
-    flex: 0 0 28px;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
     border-radius: 5px;
     object-fit: cover;
     background: var(--on-surface-raised);
@@ -564,9 +581,9 @@
   }
 
   .media-btn {
-    width: 22px;
+    width: 20px;
     height: 30px;
-    flex: 0 0 22px;
+    flex: 0 0 20px;
     display: grid;
     place-items: center;
     padding: 0;
@@ -603,9 +620,9 @@
   .load-bay {
     justify-content: space-between;
     gap: 5px;
-    padding: 0 5px;
+    padding: 0 2px;
     font-family: var(--on-font-mono);
-    font-size: 9px;
+    font-size: 8px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }

@@ -5,6 +5,7 @@
   import { deleteTask } from '$lib/task-service';
   import { get } from 'svelte/store';
   import { invoke } from '@tauri-apps/api/core';
+  import { flushPendingTaskEdits } from '$lib/pending-edits';
 
   const dispatch = createEventDispatcher();
 
@@ -94,6 +95,7 @@
       description: 'Exit the main window and Orbit Sidecar completely',
       icon: 'OFF',
       action: async () => {
+        await flushPendingTaskEdits();
         await invoke('quit_trace');
       },
     },

@@ -24,8 +24,8 @@ use windows::Win32::{
 };
 
 pub const SIDECAR_LABEL: &str = "sidecar";
-const LEFT_MARGIN: i32 = 8;
-const BOTTOM_MARGIN: i32 = 5;
+pub const LEFT_MARGIN_LOGICAL: i32 = 6;
+pub const BOTTOM_MARGIN_LOGICAL: i32 = 5;
 // Stable package-family application identities discovered from this machine's
 // registered Start apps. Versioned WindowsApps paths are deliberately avoided.
 const CHATGPT_APP_ID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
@@ -146,8 +146,8 @@ pub fn anchor(app: &AppHandle) -> Result<(), String> {
     let monitor_position = monitor.position();
     let monitor_size = monitor.size();
     let scale = monitor.scale_factor();
-    let left_margin = (LEFT_MARGIN as f64 * scale).round() as i32;
-    let bottom_margin = (BOTTOM_MARGIN as f64 * scale).round() as i32;
+    let left_margin = (LEFT_MARGIN_LOGICAL as f64 * scale).round() as i32;
+    let bottom_margin = (BOTTOM_MARGIN_LOGICAL as f64 * scale).round() as i32;
     let (x, y) = anchored_position(
         monitor_position.x,
         monitor_position.y,
@@ -165,24 +165,21 @@ pub fn anchor(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
-    apply_shell_window_style(app)?;
-    anchor(app)?;
-    app.get_webview_window(SIDECAR_LABEL)
-        .ok_or_else(|| "sidecar window is unavailable".to_string())?
-        .show()
-        .map_err(|error| error.to_string())
-}
-
-#[cfg(windows)]
-pub fn apply_shell_window_style(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window(SIDECAR_LABEL)
         .ok_or_else(|| "sidecar window is unavailable".to_string())?;
+    apply_tool_window_style(&window)?;
+    anchor(app)?;
+    window.show().map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+pub fn apply_tool_window_style(window: &tauri::WebviewWindow) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
 
     unsafe {
         let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        let shell_style = (current | WS_EX_TOOLWINDOW.0) & !WS_EX_APPWINDOW.0;
+        let shell_style = tool_window_ex_style(current);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, shell_style as isize);
         SetWindowPos(
             hwnd,
@@ -199,8 +196,13 @@ pub fn apply_shell_window_style(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn tool_window_ex_style(current: u32) -> u32 {
+    (current | WS_EX_TOOLWINDOW.0) & !WS_EX_APPWINDOW.0
+}
+
 #[cfg(not(windows))]
-pub fn apply_shell_window_style(_app: &AppHandle) -> Result<(), String> {
+pub fn apply_tool_window_style(_window: &tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
@@ -287,17 +289,28 @@ mod tests {
     #[test]
     fn anchors_inside_the_bottom_left_of_the_full_monitor_bounds() {
         assert_eq!(
-            anchored_position(0, 0, 1920, 1080, 324, 48, 8, 5),
-            (8, 1027)
+            anchored_position(0, 0, 1920, 1080, 288, 48, 6, 5),
+            (6, 1027)
         );
     }
 
     #[test]
     fn respects_offset_monitor_coordinates_and_clamps_small_monitors() {
         assert_eq!(
-            anchored_position(-1280, 40, 1280, 1024, 324, 48, 8, 5),
-            (-1272, 1011)
+            anchored_position(-1280, 40, 1280, 1024, 288, 48, 6, 5),
+            (-1274, 1011)
         );
-        assert_eq!(anchored_position(10, 20, 100, 40, 324, 48, 8, 5), (10, 20));
+        assert_eq!(anchored_position(10, 20, 100, 40, 288, 48, 6, 5), (10, 20));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn tool_window_style_suppresses_normal_app_switching_presence() {
+        use super::tool_window_ex_style;
+        use windows::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
+
+        let style = tool_window_ex_style(WS_EX_APPWINDOW.0);
+        assert_ne!(style & WS_EX_TOOLWINDOW.0, 0);
+        assert_eq!(style & WS_EX_APPWINDOW.0, 0);
     }
 }

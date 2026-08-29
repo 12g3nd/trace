@@ -21,7 +21,12 @@
     else somedayOpen = !somedayOpen;
   }
 
-  function handleEditDone() {
+  function handleEditStart(event: CustomEvent<{ id: string }>) {
+    editingId = event.detail.id;
+  }
+
+  function handleEditDone(event: CustomEvent<{ id: string }>) {
+    if (editingId !== event.detail.id) return;
     editingId = null;
     dispatch('editDone');
   }
@@ -36,6 +41,7 @@
       <TaskRow
         {task}
         editing={editingId === task.id}
+        on:editStart={handleEditStart}
         on:editDone={handleEditDone}
       />
     {/each}
@@ -59,6 +65,7 @@
           <TaskRow
             {task}
             editing={editingId === task.id}
+            on:editStart={handleEditStart}
             on:editDone={handleEditDone}
           />
         {/each}
@@ -84,6 +91,7 @@
           <TaskRow
             {task}
             editing={editingId === task.id}
+            on:editStart={handleEditStart}
             on:editDone={handleEditDone}
           />
         {/each}
