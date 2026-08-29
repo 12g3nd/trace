@@ -1,4 +1,4 @@
-# Drift — Orbit Noir Integration
+# Trace — Orbit Noir Integration
 
 How this TODO utility inherits and applies the Orbit Noir design system.
 
@@ -34,9 +34,9 @@ These are cross-application constants. Changing them here means changing them ev
 
 ## What This Utility Restrains
 
-Drift is the quietest member of the Orbit Noir family. The table below tracks what is deliberately dialed down relative to Lacquer:
+Trace is the quietest member of the Orbit Noir family. The table below tracks what is deliberately dialed down relative to Lacquer:
 
-| Aspect | Lacquer | Drift |
+| Aspect | Lacquer | Trace |
 |---|---|---|
 | Palette breadth | Full — all 9 tokens plus album-derived colour | 6 tokens active: Orbit, Atlantic, Ion, Signal, Milkglass, Moondust. Ultraviolet/Solar/Flare appear only as priority markers. |
 | Album reactivity | Yes — Experience surface adapts to artwork | None. Static Orbit Noir only. |
@@ -48,7 +48,7 @@ Drift is the quietest member of the Orbit Noir family. The table below tracks wh
 
 ## Application-Specific Decisions
 
-These belong to Drift specifically and would not propagate to other Orbit Noir members:
+These belong to Trace specifically and would not propagate to other Orbit Noir members:
 
 - **Priority bar**: 3px left-edge vertical bar, coloured from Moondust (low) through Ion (medium) to Solar/Flare (high). Replaces star decorations as the primary visual priority signal.
 - **Capture inset**: The bottom input sits in `--on-surface-inset` (`#081328`), slightly darker than the ground. Creates a recessed instrument-panel feel.
@@ -56,6 +56,15 @@ These belong to Drift specifically and would not propagate to other Orbit Noir m
 - **Completion glyph**: Open circle → filled circle with checkmark, coloured Signal. The only place teal appears in the UI.
 - **Section toggles**: Space Grotesk 11px uppercase, Moondust. Quiet instrument-panel labels with count badges in Instrument mono.
 - **Search overlay**: Scrim (`rgba(11,23,49,0.7)`) + Atlantic panel with hairline border. Not Blueglass — no blur, no GPU cost.
+
+## Orbit Sidecar
+
+The Sidecar is Trace's smallest and quietest surface: a fixed 312×52 frameless window anchored inside the bottom-left of the primary monitor work area. It uses Orbit ground, restrained hairlines, a 9px outer radius, 150ms interaction feedback, and no entrance animation or glow.
+
+- Three icon-only launchers open the locally installed LocalSend, ChatGPT, and Claude applications. Signal indicates that LocalSend is running; Moondust indicates that it is not.
+- The Trace bay is only a doorway into the main capture workflow. By design it has no database access and never displays task contents, dates, contexts, priorities, completion state, previews, or counts.
+- The Media bay reads the current Windows GSMTC session and limits itself to compact artwork, an ellipsized title, play/pause, and next. Missing sessions, metadata, artwork, or transport support collapse quietly.
+- The active Trace/Media bay is the only Sidecar preference and is stored in webview `localStorage`.
 
 ## Token Architecture
 
@@ -68,9 +77,9 @@ The intentional separation:
 
 ## What's Still Unresolved in the Broader System
 
-These are things the Orbit Noir system hasn't settled across all members yet. Drift should be ready to adopt them when they stabilize:
+These are things the Orbit Noir system hasn't settled across all members yet. Trace should be ready to adopt them when they stabilize:
 
 - **Shared token package** — currently each app declares its own copy of the palette. An `@orbitnoir/tokens` package would let one change propagate everywhere.
-- **Dark/light modes** — Orbit Noir is currently dark-only. If a secondary mode appears, Drift's token layer can swap values without touching components.
-- **Icon system** — no standard Orbit Noir icon set exists yet. Drift uses inline SVGs.
-- **Window chrome** — Lacquer builds its own titlebar. Drift currently uses native Windows decorations. Phase 2 may introduce a custom titlebar if the system requires it.
+- **Dark/light modes** — Orbit Noir is currently dark-only. If a secondary mode appears, Trace's token layer can swap values without touching components.
+- **Icon system** — no standard Orbit Noir icon set exists yet. Trace uses inline SVGs.
+- **Window chrome** — Lacquer builds its own titlebar. Trace retains native Windows decorations for the main utility while the deliberately tiny Sidecar is frameless.

@@ -1,9 +1,12 @@
 <script lang="ts">
   import '../app.css';
   import { onMount } from 'svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { initDb } from '$lib/db';
   import { refresh } from '$lib/stores';
+  import OrbitSidecar from '$lib/components/OrbitSidecar.svelte';
 
+  let windowKind: 'loading' | 'main' | 'sidecar' = 'loading';
   let ready = false;
   let loading = true;
   let initError: string | null = null;
@@ -24,13 +27,22 @@
   }
 
   onMount(() => {
-    initialize();
+    try {
+      windowKind = getCurrentWindow().label === 'sidecar' ? 'sidecar' : 'main';
+    } catch {
+      // Browser development always renders the main Trace application.
+      windowKind = 'main';
+    }
+
+    if (windowKind === 'main') initialize();
   });
 </script>
 
-{#if ready}
+{#if windowKind === 'sidecar'}
+  <OrbitSidecar />
+{:else if windowKind === 'main' && ready}
   <slot />
-{:else if initError}
+{:else if windowKind === 'main' && initError}
   <div class="init-error-container">
     <div class="init-error-card">
       <div class="init-error-header">
@@ -45,7 +57,7 @@
       </div>
     </div>
   </div>
-{:else if loading}
+{:else if windowKind === 'main' && loading}
   <div class="init-loading-container">
     <div class="init-spinner"></div>
   </div>

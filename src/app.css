@@ -32,6 +32,11 @@ html, body {
   user-select: none;
 }
 
+html.sidecar-document,
+html.sidecar-document body {
+  background: transparent;
+}
+
 /* Allow text selection inside task text and inputs */
 input, textarea, [contenteditable],
 .task-text, .task-context {
