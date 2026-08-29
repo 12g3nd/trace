@@ -1,8 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import chatgptIcon from '../../assets/orbit/chatgpt.svg';
+  import claudeIcon from '../../assets/orbit/claude.svg';
+  import localSendIcon from '../../assets/orbit/localsend.svg';
+  import {
+    cycleSidecarBay,
+    loadSidecarBay,
+    saveSidecarBay,
+    type SidecarBay,
+  } from '$lib/sidecar-state';
 
-  type Bay = 'trace' | 'media';
   type Launcher = 'localsend' | 'chatgpt' | 'claude';
 
   interface MediaState {
@@ -17,6 +25,12 @@
     canNext: boolean;
   }
 
+  interface LoadState {
+    memoryUsedGib: number;
+    memoryTotalGib: number;
+    cpuPercent: number;
+  }
+
   const EMPTY_MEDIA: MediaState = {
     available: false,
     title: '',
@@ -29,32 +43,43 @@
     canNext: false,
   };
 
-  let bay: Bay = 'trace';
+  let bay: SidecarBay = 'trace';
   let unavailableLaunchers: Launcher[] = [];
   let localSendRunning = false;
   let media = EMPTY_MEDIA;
+  let load: LoadState | null = null;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let tick = 0;
   let mediaRefreshInFlight = false;
+  let loadRefreshInFlight = false;
   let localSendRefreshInFlight = false;
 
   $: mediaLabel = media.available
     ? media.title.trim() || media.artist.trim() || 'UNTITLED'
     : 'NO MEDIA';
   $: mediaTooltip = [media.title, media.artist].filter(Boolean).join(' — ') || 'No active media session';
+  $: loadTooltip = load
+    ? `Memory ${load.memoryUsedGib.toFixed(1)} of ${load.memoryTotalGib.toFixed(1)} GiB; CPU ${Math.round(load.cpuPercent)} percent`
+    : 'System load is initializing';
 
   onMount(() => {
     document.documentElement.classList.add('sidecar-document');
-    bay = localStorage.getItem('trace.sidecar.bay') === 'media' ? 'media' : 'trace';
+    try {
+      bay = loadSidecarBay(localStorage);
+    } catch {
+      bay = 'trace';
+    }
 
-    refreshLocalSendStatus();
-    if (bay === 'media') refreshMedia();
+    void refreshLocalSendStatus();
+    if (bay === 'media') void refreshMedia();
+    if (bay === 'load') void refreshLoad();
 
     pollTimer = setInterval(() => {
       tick += 1;
-      if (bay === 'media') refreshMedia();
-      if (tick % 5 === 0) refreshLocalSendStatus();
-      if (tick % 30 === 0) refreshAnchor();
+      if (bay === 'media') void refreshMedia();
+      if (bay === 'load' && tick % 2 === 0) void refreshLoad();
+      if (tick % 5 === 0) void refreshLocalSendStatus();
+      if (tick % 15 === 0) void refreshAnchor();
     }, 1000);
 
     return () => {
@@ -93,6 +118,19 @@
     }
   }
 
+  async function refreshLoad() {
+    if (loadRefreshInFlight || bay !== 'load') return;
+    loadRefreshInFlight = true;
+    try {
+      load = await invoke<LoadState>('get_load_state');
+    } catch (error) {
+      console.warn('[Trace Sidecar] Could not read system load:', error);
+      load = null;
+    } finally {
+      loadRefreshInFlight = false;
+    }
+  }
+
   async function refreshAnchor() {
     try {
       await invoke('reanchor_sidecar');
@@ -113,9 +151,7 @@
     if (!launcherEnabled(launcher)) return;
     try {
       await invoke('launch_app', { app: launcher });
-      if (launcher === 'localsend') {
-        setTimeout(refreshLocalSendStatus, 800);
-      }
+      if (launcher === 'localsend') setTimeout(refreshLocalSendStatus, 800);
     } catch (error) {
       console.warn(`[Trace Sidecar] Could not launch ${launcher}:`, error);
       unavailableLaunchers = [...new Set([...unavailableLaunchers, launcher])];
@@ -130,10 +166,36 @@
     }
   }
 
-  function switchBay() {
-    bay = bay === 'trace' ? 'media' : 'trace';
-    localStorage.setItem('trace.sidecar.bay', bay);
-    if (bay === 'media') refreshMedia();
+  async function openTaskManager() {
+    try {
+      await invoke('open_task_manager');
+    } catch (error) {
+      console.warn('[Trace Sidecar] Could not open Task Manager:', error);
+    }
+  }
+
+  async function openContextMenu() {
+    try {
+      await invoke('show_sidecar_menu');
+    } catch (error) {
+      console.warn('[Trace Sidecar] Could not show context menu:', error);
+    }
+  }
+
+  function selectBay(direction: -1 | 1) {
+    bay = cycleSidecarBay(bay, direction);
+    try {
+      saveSidecarBay(localStorage, bay);
+    } catch {
+      // A disabled webview storage preference should not affect the Sidecar.
+    }
+    if (bay === 'media') void refreshMedia();
+    if (bay === 'load') void refreshLoad();
+  }
+
+  function handleWheel(event: WheelEvent) {
+    if (Math.abs(event.deltaY) < 1) return;
+    selectBay(event.deltaY > 0 ? 1 : -1);
   }
 
   async function runMediaCommand(action: 'toggle' | 'next') {
@@ -146,115 +208,131 @@
   }
 </script>
 
-<main class="sidecar-shell" aria-label="Orbit Sidecar">
+<main
+  class="sidecar-shell"
+  aria-label="Orbit Sidecar"
+  on:contextmenu|preventDefault={openContextMenu}
+>
   <nav class="launcher-group" aria-label="Application launchers">
     <button
-      class="launcher-btn localsend"
+      class="launcher-btn"
       disabled={!launcherEnabled('localsend')}
       title={launcherTitle('localsend', 'LocalSend')}
       aria-label="LocalSend"
       on:click={() => openLauncher('localsend')}
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M7.1 7.4a6.9 6.9 0 0 1 10.7 1.4M16.9 16.6A6.9 6.9 0 0 1 6.2 15.2" />
-        <path d="m16.2 5.6 1.9 3.4-3.8.2M7.8 18.4 5.9 15l3.8-.2" />
-        <circle cx="12" cy="12" r="1.7" />
-      </svg>
-      <span
-        class="status-dot"
-        class:running={localSendRunning}
-        aria-hidden="true"
-      ></span>
+      <img class="launcher-icon localsend-icon" src={localSendIcon} alt="" />
+      <span class:running={localSendRunning} class="status-dot" aria-hidden="true"></span>
     </button>
 
     <button
-      class="launcher-btn chatgpt"
+      class="launcher-btn"
       disabled={!launcherEnabled('chatgpt')}
       title={launcherTitle('chatgpt', 'ChatGPT')}
       aria-label="ChatGPT"
       on:click={() => openLauncher('chatgpt')}
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <g class="knot">
-          <ellipse cx="12" cy="7" rx="4.4" ry="2.5" />
-          <ellipse cx="12" cy="7" rx="4.4" ry="2.5" transform="rotate(60 12 12)" />
-          <ellipse cx="12" cy="7" rx="4.4" ry="2.5" transform="rotate(120 12 12)" />
-          <ellipse cx="12" cy="7" rx="4.4" ry="2.5" transform="rotate(180 12 12)" />
-          <ellipse cx="12" cy="7" rx="4.4" ry="2.5" transform="rotate(240 12 12)" />
-          <ellipse cx="12" cy="7" rx="4.4" ry="2.5" transform="rotate(300 12 12)" />
-        </g>
-      </svg>
+      <img class="launcher-icon chatgpt-icon" src={chatgptIcon} alt="" />
     </button>
 
     <button
-      class="launcher-btn claude"
+      class="launcher-btn"
       disabled={!launcherEnabled('claude')}
       title={launcherTitle('claude', 'Claude')}
       aria-label="Claude"
       on:click={() => openLauncher('claude')}
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" />
-        <path d="m8.1 3.7 7.8 16.6M3.7 15.9l16.6-7.8M15.9 3.7 8.1 20.3M3.7 8.1l16.6 7.8" />
-      </svg>
+      <img class="launcher-icon claude-icon" src={claudeIcon} alt="" />
     </button>
   </nav>
 
   <div class="divider" aria-hidden="true"></div>
 
-  <section class="dynamic-bay" aria-live="polite">
-    {#if bay === 'trace'}
-      <button class="trace-door" title="Open Trace capture" aria-label="Open Trace capture" on:click={openTrace}>
-        <span class="bay-label">TRACE</span>
-        <svg class="open-icon" viewBox="0 0 20 20" aria-hidden="true">
-          <path d="M10 4v12M4 10h12" />
-        </svg>
-      </button>
-    {:else}
-      <div class="media-bay" title={mediaTooltip}>
-        {#if media.artwork}
-          <img class="artwork" src={media.artwork} alt="" />
-        {:else}
-          <div class="artwork artwork-fallback" aria-hidden="true">♪</div>
-        {/if}
-        <span class:idle={!media.available} class="media-title">{mediaLabel}</span>
-        <button
-          class="media-btn"
-          disabled={!media.available || !media.canToggle}
-          title={media.playing ? 'Pause' : 'Play'}
-          aria-label={media.playing ? 'Pause current media' : 'Play current media'}
-          on:click={() => runMediaCommand('toggle')}
-        >
-          {#if media.playing}
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 5v10M13.5 5v10" /></svg>
-          {:else}
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path class="fill" d="m7 4.8 8 5.2-8 5.2z" /></svg>
-          {/if}
-        </button>
-        <button
-          class="media-btn"
-          disabled={!media.available || !media.canNext}
-          title="Next"
-          aria-label="Next media track"
-          on:click={() => runMediaCommand('next')}
-        >
-          <svg viewBox="0 0 20 20" aria-hidden="true">
-            <path class="fill" d="m5.5 5 6.5 5-6.5 5z" />
-            <path d="M13.5 5v10" />
-          </svg>
-        </button>
-      </div>
-    {/if}
-  </section>
-
-  <button
-    class="switch-btn"
-    title={bay === 'trace' ? 'Switch to Media' : 'Switch to Trace'}
-    aria-label={bay === 'trace' ? 'Switch to Media controls' : 'Switch to Trace'}
-    on:click={switchBay}
+  <section
+    class="dynamic-bay"
+    aria-label={`${bay} Sidecar bay`}
+    aria-live="polite"
+    on:wheel|preventDefault={handleWheel}
   >
-    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7.5 5 5 5-5 5" /></svg>
-  </button>
+    <button
+      class="nav-btn"
+      title="Previous bay"
+      aria-label="Previous Sidecar bay"
+      on:click={() => selectBay(-1)}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m10 3.5-4.5 4.5 4.5 4.5" /></svg>
+    </button>
+
+    <div class="bay-frame">
+      {#key bay}
+        <div class="bay-page">
+          {#if bay === 'trace'}
+            <button class="trace-door" title="Open Trace capture" aria-label="Open Trace capture" on:click={openTrace}>
+              <span class="bay-label">TRACE</span>
+              <svg class="open-icon" viewBox="0 0 18 18" aria-hidden="true">
+                <path d="M9 4v10M4 9h10" />
+              </svg>
+            </button>
+          {:else if bay === 'media'}
+            <div class="media-bay" title={mediaTooltip}>
+              {#if media.artwork}
+                <img class="artwork" src={media.artwork} alt="" />
+              {:else}
+                <div class="artwork artwork-fallback" aria-hidden="true">
+                  <svg viewBox="0 0 20 20"><path d="M8 14.2V5.4l7-1.5v8.5M8 14.2c0 1-1.1 1.8-2.4 1.8s-2.4-.8-2.4-1.8 1.1-1.8 2.4-1.8 2.4.8 2.4 1.8Zm7-1.8c0 1-1.1 1.8-2.4 1.8s-2.4-.8-2.4-1.8 1.1-1.8 2.4-1.8 2.4.8 2.4 1.8Z" /></svg>
+                </div>
+              {/if}
+              <span class:idle={!media.available} class="media-title">{mediaLabel}</span>
+              <button
+                class="media-btn"
+                disabled={!media.available || !media.canToggle}
+                title={media.playing ? 'Pause' : 'Play'}
+                aria-label={media.playing ? 'Pause current media' : 'Play current media'}
+                on:click={() => runMediaCommand('toggle')}
+              >
+                {#if media.playing}
+                  <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6 5v8M12 5v8" /></svg>
+                {:else}
+                  <svg viewBox="0 0 18 18" aria-hidden="true"><path class="fill" d="m6.5 4.8 7 4.2-7 4.2z" /></svg>
+                {/if}
+              </button>
+              <button
+                class="media-btn"
+                disabled={!media.available || !media.canNext}
+                title="Next"
+                aria-label="Next media track"
+                on:click={() => runMediaCommand('next')}
+              >
+                <svg viewBox="0 0 18 18" aria-hidden="true">
+                  <path class="fill" d="m5 5 6 4-6 4z" />
+                  <path d="M12.5 5v8" />
+                </svg>
+              </button>
+            </div>
+          {:else}
+            <button class="load-bay" title={loadTooltip} aria-label={`${loadTooltip}; open Task Manager`} on:click={openTaskManager}>
+              {#if load}
+                <span><strong>MEM</strong> {load.memoryUsedGib.toFixed(1)}/{load.memoryTotalGib.toFixed(1)}G</span>
+                <span><strong>CPU</strong> {Math.round(load.cpuPercent)}%</span>
+              {:else}
+                <span class="bay-label">LOAD</span>
+                <span class="load-pending">INITIALIZING</span>
+              {/if}
+            </button>
+          {/if}
+        </div>
+      {/key}
+    </div>
+
+    <button
+      class="nav-btn"
+      title="Next bay"
+      aria-label="Next Sidecar bay"
+      on:click={() => selectBay(1)}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 3.5 4.5 4.5L6 12.5" /></svg>
+    </button>
+  </section>
 </main>
 
 <style>
@@ -263,201 +341,256 @@
     height: 100vh;
     display: flex;
     align-items: center;
-    gap: var(--on-space-1);
-    padding: 5px 6px;
+    gap: 3px;
+    padding: 4px;
     overflow: hidden;
     color: var(--on-text);
-    background: var(--on-bg);
-    border: 1px solid var(--on-hairline-strong);
-    border-radius: var(--on-radius-lg);
-    box-shadow: 0 6px 18px var(--on-sidecar-shadow);
+    background: rgba(11, 23, 49, 0.86);
+    border: 1px solid rgba(232, 239, 245, 0.13);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+    user-select: none;
   }
 
   .launcher-group {
     display: flex;
     align-items: center;
     gap: 2px;
-    flex-shrink: 0;
+    flex: 0 0 auto;
   }
 
-  .launcher-btn,
-  .media-btn,
-  .switch-btn,
-  .trace-door {
-    transition:
-      color var(--on-duration-fast) var(--on-ease),
-      background var(--on-duration-fast) var(--on-ease),
-      opacity var(--on-duration-fast) var(--on-ease);
+  button {
+    border: 0;
   }
 
   .launcher-btn {
     position: relative;
+    width: 30px;
+    height: 38px;
     display: grid;
     place-items: center;
-    width: 34px;
-    height: 40px;
-    color: var(--on-text-secondary);
-    border-radius: var(--on-radius-sm);
+    padding: 0;
+    border-radius: 8px;
+    transition: background 150ms var(--on-ease), opacity 150ms var(--on-ease);
   }
 
   .launcher-btn:hover:not(:disabled),
-  .launcher-btn:focus-visible,
-  .media-btn:hover:not(:disabled),
-  .media-btn:focus-visible,
-  .switch-btn:hover,
-  .switch-btn:focus-visible,
-  .trace-door:hover,
-  .trace-door:focus-visible {
-    color: var(--on-text);
-    background: var(--on-accent-subtle);
+  .launcher-btn:focus-visible {
+    background: rgba(232, 239, 245, 0.08);
   }
 
-  .launcher-btn:disabled,
-  .media-btn:disabled {
-    cursor: default;
-    opacity: 0.28;
+  .launcher-btn:disabled {
+    opacity: 0.3;
   }
 
-  .launcher-btn svg {
-    width: 22px;
-    height: 22px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.55;
-    stroke-linecap: round;
-    stroke-linejoin: round;
+  .launcher-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    pointer-events: none;
   }
 
-  .chatgpt .knot {
-    stroke-width: 1.2;
+  .chatgpt-icon {
+    width: 19px;
+    height: 19px;
+    filter: invert(94%) sepia(8%) saturate(258%) hue-rotate(166deg) brightness(101%);
   }
 
-  .claude svg {
-    color: var(--on-solar);
-    stroke-width: 1.35;
+  .claude-icon {
+    width: 19px;
+    height: 19px;
   }
 
   .status-dot {
     position: absolute;
-    right: 4px;
+    right: 3px;
     bottom: 4px;
     width: 4px;
     height: 4px;
     border-radius: 50%;
-    background: var(--on-moondust);
-    opacity: 0.55;
+    background: var(--on-text-quiet);
+    opacity: 0.5;
   }
 
   .status-dot.running {
-    background: var(--on-signal);
+    background: var(--on-accent-secondary);
     opacity: 1;
   }
 
   .divider {
     width: 1px;
     height: 24px;
-    margin: 0 3px;
-    background: var(--on-hairline-strong);
-    flex-shrink: 0;
+    margin: 0 2px;
+    flex: 0 0 auto;
+    background: rgba(232, 239, 245, 0.13);
   }
 
   .dynamic-bay {
+    min-width: 0;
+    height: 38px;
     flex: 1;
-    min-width: 0;
-    height: 40px;
-  }
-
-  .trace-door,
-  .media-bay {
-    width: 100%;
-    height: 100%;
-    min-width: 0;
     display: flex;
     align-items: center;
   }
 
-  .trace-door {
-    justify-content: space-between;
-    padding: 0 3px 0 6px;
-    border-radius: var(--on-radius-sm);
+  .nav-btn {
+    width: 18px;
+    height: 34px;
+    flex: 0 0 18px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: rgba(168, 184, 202, 0.52);
+    border-radius: 6px;
+    transition: color 150ms var(--on-ease), background 150ms var(--on-ease);
+  }
+
+  .nav-btn:hover,
+  .nav-btn:focus-visible {
+    color: var(--on-text-secondary);
+    background: rgba(232, 239, 245, 0.05);
+  }
+
+  .nav-btn svg {
+    width: 13px;
+    height: 13px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .bay-frame,
+  .bay-page {
+    min-width: 0;
+    height: 38px;
+    flex: 1;
+  }
+
+  .bay-page {
+    animation: bay-in 170ms var(--on-ease);
+  }
+
+  .trace-door,
+  .load-bay {
+    width: 100%;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0 4px;
+    border-radius: 8px;
+    color: var(--on-text-secondary);
+    transition: color 150ms var(--on-ease), background 150ms var(--on-ease);
+  }
+
+  .trace-door:hover,
+  .trace-door:focus-visible,
+  .load-bay:hover,
+  .load-bay:focus-visible {
+    color: var(--on-text);
+    background: rgba(16, 42, 76, 0.62);
   }
 
   .bay-label {
     font-family: var(--on-font-graphic);
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.12em;
-    color: var(--on-text-secondary);
+    letter-spacing: 0.11em;
   }
 
   .open-icon {
-    width: 19px;
-    height: 19px;
+    width: 14px;
+    height: 14px;
     fill: none;
-    stroke: var(--on-text-quiet);
-    stroke-width: 1.4;
+    stroke: var(--on-accent);
+    stroke-width: 1.5;
     stroke-linecap: round;
   }
 
   .media-bay {
-    gap: 3px;
+    width: 100%;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
   }
 
   .artwork {
-    width: 30px;
-    height: 30px;
-    flex: 0 0 30px;
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border-radius: 5px;
     object-fit: cover;
-    border: 1px solid var(--on-hairline);
-    border-radius: var(--on-radius-sm);
+    background: var(--on-surface-raised);
   }
 
   .artwork-fallback {
     display: grid;
     place-items: center;
-    background: var(--on-surface);
     color: var(--on-text-quiet);
-    font-family: var(--on-font-graphic);
-    font-size: 13px;
+  }
+
+  .artwork-fallback svg {
+    width: 15px;
+    height: 15px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
   .media-title {
-    flex: 1;
     min-width: 0;
+    flex: 1;
     overflow: hidden;
-    white-space: nowrap;
     text-overflow: ellipsis;
+    white-space: nowrap;
     font-family: var(--on-font-interface);
     font-size: 10px;
-    font-weight: 500;
-    color: var(--on-text);
+    color: var(--on-text-secondary);
   }
 
   .media-title.idle {
     font-family: var(--on-font-mono);
     font-size: 9px;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     color: var(--on-text-quiet);
   }
 
-  .media-btn,
-  .switch-btn {
+  .media-btn {
+    width: 22px;
+    height: 30px;
+    flex: 0 0 22px;
     display: grid;
     place-items: center;
-    width: 24px;
-    height: 34px;
-    flex: 0 0 24px;
+    padding: 0;
+    border-radius: 6px;
     color: var(--on-text-secondary);
-    border-radius: var(--on-radius-sm);
+    transition: color 150ms var(--on-ease), background 150ms var(--on-ease), opacity 150ms var(--on-ease);
   }
 
-  .media-btn svg,
-  .switch-btn svg {
-    width: 18px;
-    height: 18px;
+  .media-btn:hover:not(:disabled),
+  .media-btn:focus-visible {
+    color: var(--on-text);
+    background: rgba(232, 239, 245, 0.07);
+  }
+
+  .media-btn:disabled {
+    opacity: 0.25;
+  }
+
+  .media-btn svg {
+    width: 16px;
+    height: 16px;
     fill: none;
     stroke: currentColor;
-    stroke-width: 1.55;
+    stroke-width: 1.4;
     stroke-linecap: round;
     stroke-linejoin: round;
   }
@@ -467,12 +600,51 @@
     stroke: none;
   }
 
-  .switch-btn {
-    border-left: 1px solid var(--on-hairline);
-    border-radius: 0 var(--on-radius-sm) var(--on-radius-sm) 0;
+  .load-bay {
+    justify-content: space-between;
+    gap: 5px;
+    padding: 0 5px;
+    font-family: var(--on-font-mono);
+    font-size: 9px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
-  .sidecar-shell :focus-visible {
-    outline-offset: -2px;
+  .load-bay strong {
+    color: var(--on-accent-secondary);
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .load-pending {
+    color: var(--on-text-quiet);
+    font-size: 8px;
+    letter-spacing: 0.05em;
+  }
+
+  @keyframes bay-in {
+    from {
+      opacity: 0;
+      transform: translateX(2px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .bay-page {
+      animation: none;
+    }
+
+    .launcher-btn,
+    .nav-btn,
+    .trace-door,
+    .load-bay,
+    .media-btn {
+      transition: none;
+    }
   }
 </style>

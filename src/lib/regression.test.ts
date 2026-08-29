@@ -34,6 +34,7 @@ describe('taskService (Production Hardening Regressions)', () => {
         id: 'abc123',
         text: 'Deploy service',
         raw_input: 'Deploy service ~ infra **',
+        link: null,
         status: 'now',
         context: 'infra',
         priority: 2,
@@ -53,6 +54,7 @@ describe('taskService (Production Hardening Regressions)', () => {
         'infra',
         2,
         'now',
+        null,
         null
       );
       expect(res).toEqual(mockCreatedTask);
@@ -60,13 +62,13 @@ describe('taskService (Production Hardening Regressions)', () => {
 
     it('handles input where parsing produces no distinct text by using trimmed raw input', async () => {
       await taskService.captureTask('~infra', 'later');
-      expect(db.createTask).toHaveBeenCalledWith('~infra', '~infra', null, 0, 'later', null);
+      expect(db.createTask).toHaveBeenCalledWith('~infra', '~infra', null, 0, 'later', null, null);
     });
   });
 
   describe('editTask', () => {
     it('updates raw_input, parsed text, context, priority, and due_at in db', async () => {
-      await taskService.editTask('task-1', 'Updated task name ~ work ***');
+      await taskService.editTask('task-1', 'Updated task name ~ work ***', 'docs.example.com/rc');
 
       expect(db.updateTask).toHaveBeenCalledTimes(1);
       expect(db.updateTask).toHaveBeenCalledWith('task-1', {
@@ -75,6 +77,7 @@ describe('taskService (Production Hardening Regressions)', () => {
         context: 'work',
         priority: 3,
         due_at: null,
+        link: 'https://docs.example.com/rc',
       });
     });
 
@@ -87,6 +90,7 @@ describe('taskService (Production Hardening Regressions)', () => {
         context: null,
         priority: 0,
         due_at: null,
+        link: null,
       });
     });
   });
@@ -97,6 +101,7 @@ describe('taskService (Production Hardening Regressions)', () => {
         id: 'orig-id-99',
         text: 'Important task',
         raw_input: 'Important task ~p1',
+        link: 'https://example.com/important',
         status: 'now',
         context: 'p1',
         priority: 1,
@@ -134,6 +139,7 @@ describe('taskService (Production Hardening Regressions)', () => {
       id,
       text: `Task ${id}`,
       raw_input: `Task ${id}`,
+      link: null,
       status: 'now',
       context: null,
       priority: 0,

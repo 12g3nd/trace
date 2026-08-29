@@ -1,6 +1,7 @@
 import type { Task, Status } from './types';
 import { parseInput } from './parser';
 import * as db from './db';
+import { normalizeTaskLink } from './url';
 
 /**
  * Task service — the single entry point for all task operations.
@@ -14,24 +15,28 @@ export async function captureTask(rawInput: string, status: Status = 'now'): Pro
   const parsed = parseInput(trimmed);
   if (!parsed.text) {
     // Even if parsing produced no structured text, store the raw input as-is.
-    return db.createTask(trimmed, trimmed, null, 0, status, null);
+    return db.createTask(trimmed, trimmed, null, 0, status, null, null);
   }
 
-  return db.createTask(parsed.text, trimmed, parsed.context, parsed.priority, status, parsed.due_at ?? null);
+  return db.createTask(parsed.text, trimmed, parsed.context, parsed.priority, status, parsed.due_at ?? null, null);
 }
 
 export async function editTask(
   id: string,
-  newRawInput: string
+  newRawInput: string,
+  newLink: string | null = null
 ): Promise<void> {
   const trimmed = newRawInput.trim();
   const parsed = parseInput(trimmed);
+  const normalizedLink = normalizeTaskLink(newLink);
+  if (normalizedLink.error) throw new Error(normalizedLink.error);
   await db.updateTask(id, {
     raw_input: trimmed,
     text: parsed.text || trimmed,
     context: parsed.context,
     priority: parsed.priority,
     due_at: parsed.due_at ?? null,
+    link: normalizedLink.value,
   });
 }
 

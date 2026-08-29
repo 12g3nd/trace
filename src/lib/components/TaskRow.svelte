@@ -3,6 +3,8 @@
   import type { Task } from '$lib/types';
   import { selectedId, complete, uncomplete, edit } from '$lib/stores';
   import { formatRelativeDue } from '$lib/date-parser';
+  import { normalizeTaskLink } from '$lib/url';
+  import { openUrl } from '@tauri-apps/plugin-opener';
 
   export let task: Task;
   export let editing = false;
@@ -10,7 +12,10 @@
   const dispatch = createEventDispatcher();
 
   let editText = '';
+  let editLink = '';
+  let linkError: string | null = null;
   let editInput: HTMLInputElement;
+  let editPanel: HTMLDivElement;
 
   $: selected = $selectedId === task.id;
   $: isDone = task.status === 'done';
@@ -38,6 +43,8 @@
 
   function startEdit() {
     editText = task.raw_input || task.text + (task.context ? ` ~ ${task.context}` : '') + (task.priority ? ' ' + '*'.repeat(task.priority) : '');
+    editLink = task.link ?? '';
+    linkError = null;
     editing = true;
     wasEditing = true;
     requestAnimationFrame(() => editInput?.focus());
@@ -45,12 +52,20 @@
 
   async function commitEdit() {
     const trimmed = editText.trim();
-    if (trimmed && trimmed !== task.raw_input) {
-      await edit(task.id, trimmed);
+    if (!trimmed) return;
+
+    const normalizedLink = normalizeTaskLink(editLink);
+    if (normalizedLink.error) {
+      linkError = normalizedLink.error;
+      return;
     }
+
+    await edit(task.id, trimmed, normalizedLink.value);
     editing = false;
     wasEditing = false;
     editText = '';
+    editLink = '';
+    linkError = null;
     dispatch('editDone');
   }
 
@@ -58,6 +73,8 @@
     editing = false;
     wasEditing = false;
     editText = '';
+    editLink = '';
+    linkError = null;
     dispatch('editDone');
   }
 
@@ -68,6 +85,21 @@
     } else if (e.key === 'Escape') {
       e.preventDefault();
       cancelEdit();
+    }
+  }
+
+  function handleEditorFocusout(e: FocusEvent) {
+    const nextTarget = e.relatedTarget;
+    if (nextTarget instanceof Node && editPanel?.contains(nextTarget)) return;
+    void commitEdit();
+  }
+
+  async function openTaskLink() {
+    if (!task.link) return;
+    try {
+      await openUrl(task.link);
+    } catch (error) {
+      console.warn('[Trace] Could not open task link:', error);
     }
   }
 
@@ -119,14 +151,34 @@
 
   <div class="task-content">
     {#if editing}
-      <input
-        class="edit-input"
-        type="text"
-        bind:value={editText}
-        bind:this={editInput}
-        on:keydown={handleEditKeydown}
-        on:blur={commitEdit}
-      />
+      <div class="edit-panel" bind:this={editPanel} on:focusout={handleEditorFocusout}>
+        <input
+          class="edit-input"
+          type="text"
+          bind:value={editText}
+          bind:this={editInput}
+          on:keydown={handleEditKeydown}
+          aria-label="Task"
+        />
+        <div class="link-input-row" class:invalid={linkError !== null}>
+          <svg viewBox="0 0 18 18" aria-hidden="true">
+            <path d="m7.2 10.8 3.6-3.6M6 12l-1.1 1.1a2.1 2.1 0 0 1-3-3L5 7a2.1 2.1 0 0 1 3 0M12 6l1.1-1.1a2.1 2.1 0 0 1 3 3L13 11a2.1 2.1 0 0 1-3 0" />
+          </svg>
+          <input
+            class="link-input"
+            type="url"
+            bind:value={editLink}
+            on:input={() => (linkError = null)}
+            on:keydown={handleEditKeydown}
+            placeholder="Link (optional)"
+            aria-label="Link (optional)"
+            aria-invalid={linkError !== null}
+          />
+        </div>
+        {#if linkError}
+          <span class="link-error">{linkError}</span>
+        {/if}
+      </div>
     {:else}
       <span class="task-text">{task.text}</span>
       {#if task.context}
@@ -138,10 +190,26 @@
     {/if}
   </div>
 
+  {#if !editing && task.link}
+    <button
+      class="task-link"
+      title={task.link}
+      aria-label={`Open link for ${task.text}`}
+      on:click|stopPropagation={openTaskLink}
+      on:dblclick|stopPropagation
+    >
+      <svg viewBox="0 0 18 18" aria-hidden="true">
+        <path d="m7.2 10.8 3.6-3.6M6 12l-1.1 1.1a2.1 2.1 0 0 1-3-3L5 7a2.1 2.1 0 0 1 3 0M12 6l1.1-1.1a2.1 2.1 0 0 1 3 3L13 11a2.1 2.1 0 0 1-3 0" />
+      </svg>
+    </button>
+  {/if}
+
   {#if !editing && priorityLevel > 0}
     <div class="priority-stars" aria-label="Priority {priorityLevel}">
       {#each Array(Math.min(priorityLevel, 5)) as _}
-        <span class="star">★</span>
+        <svg class="star" viewBox="0 0 12 12" aria-hidden="true">
+          <path d="m6 1 1.4 3 3.3.4-2.4 2.3.6 3.3L6 8.4 3.1 10l.6-3.3-2.4-2.3L4.6 4z" />
+        </svg>
       {/each}
     </div>
   {/if}
@@ -226,6 +294,38 @@
     gap: var(--on-space-2);
   }
 
+  .task-link {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    margin-top: 0;
+    color: var(--on-text-quiet);
+    opacity: 0.58;
+    border-radius: var(--on-radius-sm);
+    transition: opacity var(--on-duration-fast) var(--on-ease), color var(--on-duration-fast) var(--on-ease), background var(--on-duration-fast) var(--on-ease);
+  }
+
+  .task-link:hover,
+  .task-link:focus-visible {
+    opacity: 1;
+    color: var(--on-accent);
+    background: var(--on-accent-subtle);
+  }
+
+  .task-link svg,
+  .link-input-row svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
   .task-text {
     font-family: var(--on-font-interface);
     font-size: 14px;
@@ -277,8 +377,9 @@
   .priority-5 .priority-stars { color: var(--on-priority-5); }
 
   .star {
-    font-size: 9px;
-    line-height: 1;
+    width: 9px;
+    height: 9px;
+    fill: currentColor;
   }
 
   .edit-input {
@@ -290,5 +391,46 @@
     padding: var(--on-space-1) var(--on-space-2);
     border-radius: var(--on-radius-sm);
     border: 1px solid var(--on-accent);
+  }
+
+  .edit-panel {
+    width: 100%;
+    display: grid;
+    gap: var(--on-space-1);
+  }
+
+  .link-input-row {
+    display: flex;
+    align-items: center;
+    gap: var(--on-space-1);
+    color: var(--on-text-quiet);
+    background: var(--on-surface-inset);
+    padding: 0 var(--on-space-2);
+    border: 1px solid var(--on-hairline);
+    border-radius: var(--on-radius-sm);
+  }
+
+  .link-input-row:focus-within {
+    color: var(--on-accent);
+    border-color: var(--on-accent);
+  }
+
+  .link-input-row.invalid {
+    border-color: var(--on-priority-5);
+  }
+
+  .link-input {
+    min-width: 0;
+    flex: 1;
+    padding: var(--on-space-1) 0;
+    font-family: var(--on-font-mono);
+    font-size: 11px;
+    color: var(--on-text-secondary);
+  }
+
+  .link-error {
+    font-family: var(--on-font-mono);
+    font-size: 9px;
+    color: var(--on-priority-5);
   }
 </style>

@@ -7,6 +7,7 @@ const mockTasks: Task[] = [
     id: '1',
     text: 'Cancel DigitalOcean',
     raw_input: 'Cancel DigitalOcean ~ krine',
+    link: 'https://cloud.digitalocean.com/',
     status: 'now',
     context: 'krine',
     priority: 0,
@@ -20,6 +21,7 @@ const mockTasks: Task[] = [
     id: '2',
     text: 'Write essay',
     raw_input: 'Write essay ~ chatgpt *****',
+    link: null,
     status: 'now',
     context: 'chatgpt',
     priority: 5,
@@ -33,6 +35,7 @@ const mockTasks: Task[] = [
     id: '3',
     text: 'Completed chore',
     raw_input: 'Completed chore',
+    link: null,
     status: 'done',
     context: null,
     priority: 0,
@@ -58,13 +61,15 @@ describe('Export Formatters', () => {
     expect(parsed.version).toBe('1.0');
     expect(parsed.tasks).toHaveLength(3);
     expect(parsed.tasks[1].priority).toBe(5);
+    expect(parsed.tasks[0].link).toBe('https://cloud.digitalocean.com/');
   });
 
   it('formats tasks as CSV with proper headers and escaping', () => {
     const csvStr = formatAsCsv(mockTasks);
     const lines = csvStr.split('\n');
-    expect(lines[0]).toBe('id,text,status,context,priority,created_at,completed_at');
+    expect(lines[0]).toBe('id,text,link,status,context,priority,created_at,completed_at');
     expect(lines[1]).toContain('Cancel DigitalOcean');
+    expect(lines[1]).toContain('https://cloud.digitalocean.com/');
     expect(lines[2]).toContain('Write essay');
   });
 });

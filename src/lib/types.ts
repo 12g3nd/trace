@@ -4,6 +4,7 @@ export interface Task {
   id: string;
   text: string;
   raw_input: string | null;
+  link: string | null;
   status: Status;
   context: string | null;
   priority: number;

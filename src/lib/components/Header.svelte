@@ -2,6 +2,7 @@
   import { createEventDispatcher, onMount } from 'svelte';
   import { taskCounts, nowTasks } from '$lib/stores';
   import { invoke } from '@tauri-apps/api/core';
+  import pinIcon from '../../assets/orbit/pin.svg';
 
   const dispatch = createEventDispatcher();
 
@@ -44,7 +45,7 @@
       aria-label="Toggle pin always on top"
       title={pinned ? 'Unpin from top' : 'Pin always on top'}
     >
-      📌
+      <img class="pin-icon" src={pinIcon} alt="" />
     </button>
     <button
       class="icon-btn"
@@ -52,7 +53,9 @@
       aria-label="Open settings"
       title="Settings & Commands"
     >
-      ⚙
+      <svg class="settings-icon" viewBox="0 0 18 18" aria-hidden="true">
+        <path d="M4 5.2h10M4 9h10M4 12.8h10M7 3.8v2.8M11.5 7.6v2.8M8.5 11.4v2.8" />
+      </svg>
     </button>
   </div>
 </header>
@@ -114,5 +117,26 @@
     opacity: 1;
     color: var(--on-accent);
     background: var(--on-accent-subtle);
+  }
+
+  .pin-icon,
+  .settings-icon {
+    width: 13px;
+    height: 13px;
+  }
+
+  .pin-icon {
+    filter: invert(76%) sepia(14%) saturate(415%) hue-rotate(167deg) brightness(93%);
+  }
+
+  .icon-btn.active .pin-icon {
+    filter: invert(51%) sepia(97%) saturate(3164%) hue-rotate(213deg) brightness(102%);
+  }
+
+  .settings-icon {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.25;
+    stroke-linecap: round;
   }
 </style>

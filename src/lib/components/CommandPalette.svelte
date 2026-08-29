@@ -4,6 +4,7 @@
   import { formatAsTodoTxt, formatAsJson, formatAsCsv, downloadFile } from '$lib/export';
   import { deleteTask } from '$lib/task-service';
   import { get } from 'svelte/store';
+  import { invoke } from '@tauri-apps/api/core';
 
   const dispatch = createEventDispatcher();
 
@@ -76,6 +77,24 @@
       icon: 'SET',
       action: () => {
         dispatch('openSettings');
+      },
+    },
+    {
+      id: 'reanchor-sidecar',
+      title: 'Re-anchor Sidecar',
+      description: 'Return Sidecar to the primary display bottom-left rail position',
+      icon: 'POS',
+      action: async () => {
+        await invoke('reanchor_sidecar');
+      },
+    },
+    {
+      id: 'quit-trace',
+      title: 'Quit Trace',
+      description: 'Exit the main window and Orbit Sidecar completely',
+      icon: 'OFF',
+      action: async () => {
+        await invoke('quit_trace');
       },
     },
   ];

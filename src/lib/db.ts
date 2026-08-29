@@ -35,6 +35,8 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
   CREATE INDEX IF NOT EXISTS idx_tasks_context ON tasks(context);`,
+  // v2: optional per-task web link
+  `ALTER TABLE tasks ADD COLUMN link TEXT;`,
 ];
 
 async function migrate(): Promise<void> {
@@ -117,7 +119,8 @@ export async function createTask(
   context: string | null,
   priority: number,
   status: Status = 'now',
-  dueAt: string | null = null
+  dueAt: string | null = null,
+  link: string | null = null
 ): Promise<Task> {
   const d = getDb();
   const id = generateId();
@@ -125,15 +128,16 @@ export async function createTask(
   const order = await nextSortOrder(status);
 
   await d.execute(
-    `INSERT INTO tasks (id, text, raw_input, status, context, priority, due_at, created_at, updated_at, sort_order)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-    [id, text, rawInput, status, context, priority, dueAt, now, now, order]
+    `INSERT INTO tasks (id, text, raw_input, link, status, context, priority, due_at, created_at, updated_at, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [id, text, rawInput, link, status, context, priority, dueAt, now, now, order]
   );
 
   return {
     id,
     text,
     raw_input: rawInput,
+    link,
     status,
     context,
     priority,
@@ -147,7 +151,7 @@ export async function createTask(
 
 export async function updateTask(
   id: string,
-  fields: Partial<Pick<Task, 'text' | 'raw_input' | 'context' | 'priority' | 'status' | 'sort_order' | 'due_at'>>
+  fields: Partial<Pick<Task, 'text' | 'raw_input' | 'link' | 'context' | 'priority' | 'status' | 'sort_order' | 'due_at'>>
 ): Promise<void> {
   const d = getDb();
   const sets: string[] = [];
@@ -211,12 +215,13 @@ export async function restoreTask(task: Task): Promise<void> {
   const d = getDb();
   await d.execute(
     `INSERT OR REPLACE INTO tasks
-       (id, text, raw_input, status, context, priority, due_at, created_at, updated_at, completed_at, sort_order)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+       (id, text, raw_input, link, status, context, priority, due_at, created_at, updated_at, completed_at, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       task.id,
       task.text,
       task.raw_input,
+      task.link,
       task.status,
       task.context,
       task.priority,
@@ -234,7 +239,7 @@ export async function searchTasks(query: string): Promise<Task[]> {
   const pattern = `%${query}%`;
   return d.select<Task[]>(
     `SELECT * FROM tasks
-     WHERE text LIKE $1 OR context LIKE $1 OR raw_input LIKE $1
+     WHERE text LIKE $1 OR context LIKE $1 OR raw_input LIKE $1 OR link LIKE $1
      ORDER BY
        CASE status WHEN 'now' THEN 0 WHEN 'later' THEN 1 WHEN 'someday' THEN 2 ELSE 3 END,
        sort_order`,

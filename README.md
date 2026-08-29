@@ -10,17 +10,18 @@ It is tailored for my personal machine and the Orbit Noir desktop theme (matchin
 
 ## Orbit Sidecar
 
-Trace also runs a compact, always-on-top **Orbit Sidecar** at the bottom-left of the primary monitor's Windows work area. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`.
+Trace also runs a compact, always-on-top **Orbit Sidecar** in the bottom-left rail plane of the primary monitor's full physical bounds. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry of its own.
 
 The Sidecar provides:
 
 - Local launch/focus controls for **LocalSend**, **ChatGPT**, and **Claude** using their installed Windows app identities.
 - A quiet **Trace** doorway that summons the main window and focuses its normal capture workflow.
 - A switchable **Media** bay for the current Windows system media session, with album art, title, play/pause, and next when supported.
+- A minimal **Load** bay showing native Windows memory use and CPU load; click it to open Task Manager.
 
-The selected Trace/Media bay persists locally. Media is read through Windows GSMTC, so it works with compliant players rather than a specific music service. The Sidecar intentionally never queries or displays TODO contents, task metadata, or task counts.
+The selected Trace/Media/Load bay persists locally. Use the quiet chevrons or the mouse wheel over the bay to cycle it. Media is read through Windows GSMTC, while Load uses lightweight native system APIs and only polls while visible. The Sidecar intentionally never queries or displays TODO contents, task metadata, or task counts.
 
-Use the existing Trace tray icon to open Trace, show/hide the Sidecar, re-anchor it after display changes, or quit the process. There is no second tray icon and no taskbar modification.
+Right-click Sidecar for **Open Trace**, **Re-anchor Sidecar**, **Start with Windows**, and **Quit Trace**. Trace has no tray icon and does not modify or reserve the Windows taskbar.
 
 ---
 
@@ -38,6 +39,8 @@ Message Michael about RC tomorrow ~ rc **
 - **Priority**: Trailing asterisks `*` through `*****` (1 to 5)
 
 Plain text with no special syntax also works.
+
+Double-click a task (or select it and press Enter) to edit its text and optional web link. Linked tasks show one quiet vector link control that opens through the system default application; links are included in JSON and CSV exports while TODO.txt remains standard.
 
 ---
 

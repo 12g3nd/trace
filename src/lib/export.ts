@@ -60,7 +60,7 @@ export function formatAsJson(tasks: Task[]): string {
  * Format tasks as spreadsheet-compatible CSV.
  */
 export function formatAsCsv(tasks: Task[]): string {
-  const headers = ['id', 'text', 'status', 'context', 'priority', 'created_at', 'completed_at'];
+  const headers = ['id', 'text', 'link', 'status', 'context', 'priority', 'created_at', 'completed_at'];
   
   function escapeCsv(val: string | number | null | undefined): string {
     if (val === null || val === undefined) return '';
@@ -74,6 +74,7 @@ export function formatAsCsv(tasks: Task[]): string {
   const rows = tasks.map((t) => [
     escapeCsv(t.id),
     escapeCsv(t.text),
+    escapeCsv(t.link),
     escapeCsv(t.status),
     escapeCsv(t.context),
     escapeCsv(t.priority),

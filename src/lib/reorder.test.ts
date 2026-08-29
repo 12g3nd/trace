@@ -22,6 +22,7 @@ function mockTask(id: string, sort_order: number): Task {
     id,
     text: `Task ${id}`,
     raw_input: null,
+    link: null,
     status: 'now',
     context: null,
     priority: 0,

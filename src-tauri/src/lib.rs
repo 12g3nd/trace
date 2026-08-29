@@ -1,13 +1,14 @@
+mod load;
 mod media;
 mod sidecar;
 
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use tauri::{
-    menu::{Menu, MenuItem},
-    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    menu::{CheckMenuItem, Menu, MenuItem},
     Emitter, Manager,
 };
+use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[derive(serde::Serialize, Clone, Debug)]
@@ -22,6 +23,7 @@ pub struct AppState {
     pub shortcuts: Mutex<Vec<ShortcutStatus>>,
     launchers: Arc<sidecar::LauncherRegistry>,
     media: Arc<Mutex<media::MediaController>>,
+    load: Arc<Mutex<load::LoadSampler>>,
 }
 
 #[tauri::command]
@@ -100,6 +102,23 @@ async fn media_command(action: String, state: tauri::State<'_, AppState>) -> Res
 }
 
 #[tauri::command]
+async fn get_load_state(state: tauri::State<'_, AppState>) -> Result<load::LoadState, String> {
+    let load = Arc::clone(&state.load);
+    tauri::async_runtime::spawn_blocking(move || {
+        load.lock()
+            .map_err(|_| "system load sampler lock is unavailable".to_string())?
+            .sample()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+fn open_task_manager() -> Result<(), String> {
+    load::open_task_manager()
+}
+
+#[tauri::command]
 fn reanchor_sidecar(app: tauri::AppHandle) -> Result<(), String> {
     sidecar::anchor(&app)
 }
@@ -107,6 +126,49 @@ fn reanchor_sidecar(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn toggle_sidecar(app: tauri::AppHandle) -> Result<bool, String> {
     sidecar::toggle(&app)
+}
+
+#[tauri::command]
+fn show_sidecar_menu(window: tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() != sidecar::SIDECAR_LABEL {
+        return Err("the Sidecar menu is only available from the Sidecar".into());
+    }
+
+    let app = window.app_handle();
+    let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    let open_item = MenuItem::with_id(app, "sidecar-open", "Open Trace", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let reanchor_item = MenuItem::with_id(
+        app,
+        "sidecar-reanchor",
+        "Re-anchor Sidecar",
+        true,
+        None::<&str>,
+    )
+    .map_err(|error| error.to_string())?;
+    let autostart_item = CheckMenuItem::with_id(
+        app,
+        "sidecar-autostart",
+        "Start with Windows",
+        true,
+        autostart_enabled,
+        None::<&str>,
+    )
+    .map_err(|error| error.to_string())?;
+    let quit_item = MenuItem::with_id(app, "sidecar-quit", "Quit Trace", true, None::<&str>)
+        .map_err(|error| error.to_string())?;
+    let menu = Menu::with_items(
+        app,
+        &[&open_item, &reanchor_item, &autostart_item, &quit_item],
+    )
+    .map_err(|error| error.to_string())?;
+
+    window.popup_menu(&menu).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn quit_trace(app: tauri::AppHandle) {
+    app.exit(0);
 }
 
 fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
@@ -161,8 +223,12 @@ pub fn run() {
             is_localsend_running,
             get_media_state,
             media_command,
+            get_load_state,
+            open_task_manager,
             reanchor_sidecar,
-            toggle_sidecar
+            toggle_sidecar,
+            show_sidecar_menu,
+            quit_trace
         ])
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
@@ -235,78 +301,32 @@ pub fn run() {
                 }
             }
 
-            let show_item = MenuItem::with_id(app, "show", "Open Trace", true, None::<&str>)?;
-            let sidecar_item = MenuItem::with_id(
-                app,
-                "toggle-sidecar",
-                "Show/Hide Sidecar",
-                true,
-                None::<&str>,
-            )?;
-            let reanchor_item = MenuItem::with_id(
-                app,
-                "reanchor-sidecar",
-                "Re-anchor Sidecar",
-                true,
-                None::<&str>,
-            )?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(
-                app,
-                &[&show_item, &sidecar_item, &reanchor_item, &quit_item],
-            )?;
-
-            let tray_builder = TrayIconBuilder::with_id("tray")
-                .icon(tauri::include_image!("icons/icon.ico"))
-                .menu(&menu)
-                .show_menu_on_left_click(false)
-                .tooltip("Trace")
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "show" => {
-                        if let Err(error) = show_main_window(app) {
-                            eprintln!("[Trace] Failed to show main window: {error}");
-                        }
-                    }
-                    "toggle-sidecar" => {
-                        if let Err(error) = sidecar::toggle(app) {
-                            eprintln!("[Trace] Failed to toggle Sidecar: {error}");
-                        }
-                    }
-                    "reanchor-sidecar" => {
-                        if let Err(error) = sidecar::anchor(app) {
-                            eprintln!("[Trace] Failed to re-anchor Sidecar: {error}");
-                        }
-                    }
-                    "quit" => {
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            toggle_window(&window);
-                        }
-                    }
-                });
-
-            // If the tray fails, the app could be invisible and unreachable.
-            // Force the window visible as a safety net.
-            if let Err(e) = tray_builder.build(app) {
-                eprintln!("[Trace] Tray icon failed to build: {}", e);
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+            Ok(())
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "sidecar-open" => {
+                if let Err(error) = show_main_window(app) {
+                    eprintln!("[Trace] Failed to show main window: {error}");
                 }
             }
-
-            Ok(())
+            "sidecar-reanchor" => {
+                if let Err(error) = sidecar::anchor(app) {
+                    eprintln!("[Trace] Failed to re-anchor Sidecar: {error}");
+                }
+            }
+            "sidecar-autostart" => {
+                let manager = app.autolaunch();
+                let result = match manager.is_enabled() {
+                    Ok(true) => manager.disable(),
+                    Ok(false) => manager.enable(),
+                    Err(error) => Err(error),
+                };
+                if let Err(error) = result {
+                    eprintln!("[Trace] Failed to toggle Start with Windows: {error}");
+                }
+            }
+            "sidecar-quit" => app.exit(0),
+            _ => {}
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -314,7 +334,10 @@ pub fn run() {
                 let _ = window.hide();
             }
             if window.label() == sidecar::SIDECAR_LABEL
-                && matches!(event, tauri::WindowEvent::ScaleFactorChanged { .. })
+                && matches!(
+                    event,
+                    tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Resized(_)
+                )
             {
                 if let Err(error) = sidecar::anchor(window.app_handle()) {
                     eprintln!("[Trace] Failed to re-anchor Sidecar after display change: {error}");

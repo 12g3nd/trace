@@ -17,11 +17,15 @@ use windows::Win32::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     },
+    UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    },
 };
 
 pub const SIDECAR_LABEL: &str = "sidecar";
-const LEFT_MARGIN: i32 = 14;
-const BOTTOM_MARGIN: i32 = 10;
+const LEFT_MARGIN: i32 = 8;
+const BOTTOM_MARGIN: i32 = 5;
 // Stable package-family application identities discovered from this machine's
 // registered Start apps. Versioned WindowsApps paths are deliberately avoided.
 const CHATGPT_APP_ID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
@@ -137,15 +141,18 @@ pub fn anchor(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "primary monitor is unavailable".to_string())?;
     let window_size = window.outer_size().map_err(|error| error.to_string())?;
-    let work_area = monitor.work_area();
+    // Monitor position/size are the physical full bounds. Deliberately do not
+    // use work_area(): the Orbit Rail occupies the physical bottom screen band.
+    let monitor_position = monitor.position();
+    let monitor_size = monitor.size();
     let scale = monitor.scale_factor();
     let left_margin = (LEFT_MARGIN as f64 * scale).round() as i32;
     let bottom_margin = (BOTTOM_MARGIN as f64 * scale).round() as i32;
     let (x, y) = anchored_position(
-        work_area.position.x,
-        work_area.position.y,
-        work_area.size.width,
-        work_area.size.height,
+        monitor_position.x,
+        monitor_position.y,
+        monitor_size.width,
+        monitor_size.height,
         window_size.width,
         window_size.height,
         left_margin,
@@ -158,11 +165,43 @@ pub fn anchor(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
+    apply_shell_window_style(app)?;
     anchor(app)?;
     app.get_webview_window(SIDECAR_LABEL)
         .ok_or_else(|| "sidecar window is unavailable".to_string())?
         .show()
         .map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+pub fn apply_shell_window_style(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window(SIDECAR_LABEL)
+        .ok_or_else(|| "sidecar window is unavailable".to_string())?;
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+
+    unsafe {
+        let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let shell_style = (current | WS_EX_TOOLWINDOW.0) & !WS_EX_APPWINDOW.0;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, shell_style as isize);
+        SetWindowPos(
+            hwnd,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+pub fn apply_shell_window_style(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
 }
 
 pub fn toggle(app: &AppHandle) -> Result<bool, String> {
@@ -181,19 +220,22 @@ pub fn toggle(app: &AppHandle) -> Result<bool, String> {
 }
 
 fn anchored_position(
-    work_x: i32,
-    work_y: i32,
-    work_width: u32,
-    work_height: u32,
+    screen_x: i32,
+    screen_y: i32,
+    screen_width: u32,
+    screen_height: u32,
     window_width: u32,
     window_height: u32,
     left_margin: i32,
     bottom_margin: i32,
 ) -> (i32, i32) {
-    let max_x = work_x.saturating_add(work_width.saturating_sub(window_width) as i32);
-    let max_y = work_y.saturating_add(work_height.saturating_sub(window_height) as i32);
-    let x = work_x.saturating_add(left_margin).min(max_x).max(work_x);
-    let y = max_y.saturating_sub(bottom_margin).max(work_y);
+    let max_x = screen_x.saturating_add(screen_width.saturating_sub(window_width) as i32);
+    let max_y = screen_y.saturating_add(screen_height.saturating_sub(window_height) as i32);
+    let x = screen_x
+        .saturating_add(left_margin)
+        .min(max_x)
+        .max(screen_x);
+    let y = max_y.saturating_sub(bottom_margin).max(screen_y);
     (x, y)
 }
 
@@ -243,22 +285,19 @@ mod tests {
     use super::anchored_position;
 
     #[test]
-    fn anchors_inside_the_bottom_left_of_the_work_area() {
+    fn anchors_inside_the_bottom_left_of_the_full_monitor_bounds() {
         assert_eq!(
-            anchored_position(0, 0, 1920, 1040, 312, 52, 14, 10),
-            (14, 978)
+            anchored_position(0, 0, 1920, 1080, 324, 48, 8, 5),
+            (8, 1027)
         );
     }
 
     #[test]
-    fn respects_offset_monitor_coordinates_and_clamps_small_work_areas() {
+    fn respects_offset_monitor_coordinates_and_clamps_small_monitors() {
         assert_eq!(
-            anchored_position(-1280, 40, 1280, 984, 312, 52, 14, 10),
-            (-1266, 962)
+            anchored_position(-1280, 40, 1280, 1024, 324, 48, 8, 5),
+            (-1272, 1011)
         );
-        assert_eq!(
-            anchored_position(10, 20, 100, 40, 312, 52, 14, 10),
-            (10, 20)
-        );
+        assert_eq!(anchored_position(10, 20, 100, 40, 324, 48, 8, 5), (10, 20));
     }
 }

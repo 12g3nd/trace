@@ -138,8 +138,8 @@ export async function move(id: string, newStatus: Status) {
   });
 }
 
-export async function edit(id: string, newRawInput: string) {
-  await taskService.editTask(id, newRawInput);
+export async function edit(id: string, newRawInput: string, link: string | null) {
+  await taskService.editTask(id, newRawInput, link);
   await refresh();
 }
 
