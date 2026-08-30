@@ -19,9 +19,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 pub const SIDECAR_LABEL: &str = "sidecar";
 pub const SIDECAR_WIDTH_LOGICAL: u32 = 288;
-pub const SIDECAR_HEIGHT_LOGICAL: u32 = 44;
+pub const SIDECAR_HEIGHT_LOGICAL: u32 = 48;
 pub const LEFT_MARGIN_LOGICAL: i32 = 5;
-pub const BOTTOM_MARGIN_LOGICAL: i32 = 4;
+pub const BOTTOM_MARGIN_LOGICAL: i32 = 0;
 pub const MEDIA_POPOVER_LABEL: &str = "media-popover";
 pub const MEDIA_POPOVER_WIDTH_LOGICAL: u32 = 288;
 pub const MEDIA_POPOVER_HEIGHT_LOGICAL: u32 = 108;
