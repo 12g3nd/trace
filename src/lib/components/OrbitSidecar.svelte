@@ -1,9 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
   import chatgptIcon from '../../assets/orbit/chatgpt.svg';
   import claudeIcon from '../../assets/orbit/claude.svg';
   import localSendIcon from '../../assets/orbit/localsend.svg';
+  import { MediaPopoverIntent } from '$lib/media-popover-intent';
+  import {
+    EMPTY_MEDIA,
+    MEDIA_POPOVER_HOVER_EVENT,
+    MEDIA_REFRESH_EVENT,
+    MEDIA_STATE_EVENT,
+    type MediaState,
+  } from '$lib/media-state';
   import {
     cycleSidecarBay,
     loadSidecarBay,
@@ -13,46 +22,24 @@
 
   type Launcher = 'localsend' | 'chatgpt' | 'claude';
 
-  interface MediaState {
-    available: boolean;
-    title: string;
-    artist: string;
-    source: string;
-    artworkKey: string | null;
-    artwork: string | null;
-    playing: boolean;
-    canToggle: boolean;
-    canNext: boolean;
-  }
-
   interface LoadState {
     memoryUsedGib: number;
     memoryTotalGib: number;
     cpuPercent: number;
   }
 
-  const EMPTY_MEDIA: MediaState = {
-    available: false,
-    title: '',
-    artist: '',
-    source: '',
-    artworkKey: null,
-    artwork: null,
-    playing: false,
-    canToggle: false,
-    canNext: false,
-  };
-
   let bay: SidecarBay = 'trace';
   let unavailableLaunchers: Launcher[] = [];
-  let localSendRunning = false;
   let media = EMPTY_MEDIA;
   let load: LoadState | null = null;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let tick = 0;
   let mediaRefreshInFlight = false;
   let loadRefreshInFlight = false;
-  let localSendRefreshInFlight = false;
+  let hoverIntent: MediaPopoverIntent | undefined;
+  let unlistenPopoverHover: UnlistenFn | undefined;
+  let unlistenMediaRefresh: UnlistenFn | undefined;
+  let disposed = false;
 
   $: mediaLabel = media.available
     ? media.title.trim() || media.artist.trim() || 'UNTITLED'
@@ -63,14 +50,34 @@
     : 'System load is initializing';
 
   onMount(() => {
-    document.documentElement.classList.add('sidecar-document');
+    document.documentElement.classList.add('shell-document');
     try {
       bay = loadSidecarBay(localStorage);
     } catch {
       bay = 'trace';
     }
 
-    void refreshLocalSendStatus();
+    hoverIntent = new MediaPopoverIntent({
+      show: () => void showMediaPopover(),
+      hide: () => void hideMediaPopover(),
+    });
+    hoverIntent.setContext(bay === 'media', media.available);
+
+    void listen<boolean>(MEDIA_POPOVER_HOVER_EVENT, (event) => {
+      hoverIntent?.setPopoverHovered(event.payload);
+    })
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else unlistenPopoverHover = unlisten;
+      })
+      .catch((error) => console.warn('[Trace Sidecar] Could not subscribe to popover hover:', error));
+    void listen(MEDIA_REFRESH_EVENT, () => void refreshMedia())
+      .then((unlisten) => {
+        if (disposed) unlisten();
+        else unlistenMediaRefresh = unlisten;
+      })
+      .catch((error) => console.warn('[Trace Sidecar] Could not subscribe to media refresh:', error));
+
     if (bay === 'media') void refreshMedia();
     if (bay === 'load') void refreshLoad();
 
@@ -78,28 +85,18 @@
       tick += 1;
       if (bay === 'media') void refreshMedia();
       if (bay === 'load' && tick % 2 === 0) void refreshLoad();
-      if (tick % 5 === 0) void refreshLocalSendStatus();
       if (tick % 15 === 0) void refreshAnchor();
     }, 1000);
 
     return () => {
-      document.documentElement.classList.remove('sidecar-document');
+      disposed = true;
+      hoverIntent?.destroy();
+      unlistenPopoverHover?.();
+      unlistenMediaRefresh?.();
+      document.documentElement.classList.remove('shell-document');
       if (pollTimer) clearInterval(pollTimer);
     };
   });
-
-  async function refreshLocalSendStatus() {
-    if (localSendRefreshInFlight) return;
-    localSendRefreshInFlight = true;
-    try {
-      localSendRunning = await invoke<boolean>('is_localsend_running');
-    } catch (error) {
-      console.warn('[Trace Sidecar] Could not read LocalSend status:', error);
-      localSendRunning = false;
-    } finally {
-      localSendRefreshInFlight = false;
-    }
-  }
 
   async function refreshMedia() {
     if (mediaRefreshInFlight) return;
@@ -115,6 +112,33 @@
       media = EMPTY_MEDIA;
     } finally {
       mediaRefreshInFlight = false;
+      hoverIntent?.setContext(bay === 'media', media.available);
+      void publishMediaState();
+    }
+  }
+
+  async function publishMediaState() {
+    try {
+      await emitTo('media-popover', MEDIA_STATE_EVENT, media);
+    } catch (error) {
+      console.warn('[Trace Sidecar] Could not publish media state:', error);
+    }
+  }
+
+  async function showMediaPopover() {
+    await publishMediaState();
+    try {
+      await invoke('show_media_popover');
+    } catch (error) {
+      console.warn('[Trace Sidecar] Could not show media popover:', error);
+    }
+  }
+
+  async function hideMediaPopover() {
+    try {
+      await invoke('hide_media_popover');
+    } catch (error) {
+      console.warn('[Trace Sidecar] Could not hide media popover:', error);
     }
   }
 
@@ -151,7 +175,6 @@
     if (!launcherEnabled(launcher)) return;
     try {
       await invoke('launch_app', { app: launcher });
-      if (launcher === 'localsend') setTimeout(refreshLocalSendStatus, 800);
     } catch (error) {
       console.warn(`[Trace Sidecar] Could not launch ${launcher}:`, error);
       unavailableLaunchers = [...new Set([...unavailableLaunchers, launcher])];
@@ -189,6 +212,7 @@
     } catch {
       // A disabled webview storage preference should not affect the Sidecar.
     }
+    hoverIntent?.setContext(bay === 'media', media.available);
     if (bay === 'media') void refreshMedia();
     if (bay === 'load') void refreshLoad();
   }
@@ -198,7 +222,16 @@
     selectBay(event.deltaY > 0 ? 1 : -1);
   }
 
-  async function runMediaCommand(action: 'toggle' | 'next') {
+  async function openMediaSource() {
+    if (!media.available) return;
+    try {
+      await invoke('open_media_source');
+    } catch (error) {
+      console.warn('[Trace Sidecar] Could not activate media source:', error);
+    }
+  }
+
+  async function runMediaCommand(action: 'previous' | 'toggle' | 'next') {
     try {
       await invoke('media_command', { action });
       setTimeout(refreshMedia, 120);
@@ -222,7 +255,6 @@
       on:click={() => openLauncher('localsend')}
     >
       <img class="launcher-icon localsend-icon" src={localSendIcon} alt="" />
-      <span class:running={localSendRunning} class="status-dot" aria-hidden="true"></span>
     </button>
 
     <button
@@ -274,7 +306,22 @@
               </svg>
             </button>
           {:else if bay === 'media'}
-            <div class="media-bay" title={mediaTooltip}>
+            <div
+              class="media-bay"
+              class:source-available={media.available}
+              role="group"
+              aria-label="Compact media controls"
+              title={mediaTooltip}
+              on:mouseenter={() => hoverIntent?.setCompactHovered(true)}
+              on:mouseleave={() => hoverIntent?.setCompactHovered(false)}
+            >
+              <button
+                class="compact-source"
+                tabindex="-1"
+                disabled={!media.available}
+                aria-label={media.available ? 'Open current media source' : 'No active media session'}
+                on:click={openMediaSource}
+              ></button>
               {#if media.artwork}
                 <img class="artwork" src={media.artwork} alt="" />
               {:else}
@@ -288,7 +335,7 @@
                 disabled={!media.available || !media.canToggle}
                 title={media.playing ? 'Pause' : 'Play'}
                 aria-label={media.playing ? 'Pause current media' : 'Play current media'}
-                on:click={() => runMediaCommand('toggle')}
+                on:click|stopPropagation={() => runMediaCommand('toggle')}
               >
                 {#if media.playing}
                   <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6 5v8M12 5v8" /></svg>
@@ -301,7 +348,7 @@
                 disabled={!media.available || !media.canNext}
                 title="Next"
                 aria-label="Next media track"
-                on:click={() => runMediaCommand('next')}
+                on:click|stopPropagation={() => runMediaCommand('next')}
               >
                 <svg viewBox="0 0 18 18" aria-hidden="true">
                   <path class="fill" d="m5 5 6 4-6 4z" />
@@ -345,10 +392,9 @@
     padding: 2px 4px;
     overflow: hidden;
     color: var(--on-text);
-    background: rgba(11, 23, 49, 0.92);
-    border: 1px solid rgba(232, 239, 245, 0.12);
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+    background: rgba(11, 23, 49, 0.8);
+    border: 1px solid rgba(127, 166, 196, 0.17);
+    border-radius: 10px;
     user-select: none;
   }
 
@@ -402,22 +448,6 @@
   .claude-icon {
     width: 19px;
     height: 19px;
-  }
-
-  .status-dot {
-    position: absolute;
-    right: 3px;
-    bottom: 4px;
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: var(--on-text-quiet);
-    opacity: 0.5;
-  }
-
-  .status-dot.running {
-    background: var(--on-accent-secondary);
-    opacity: 1;
   }
 
   .divider {
@@ -529,6 +559,7 @@
   }
 
   .media-bay {
+    position: relative;
     width: 100%;
     height: 38px;
     display: flex;
@@ -537,13 +568,35 @@
     min-width: 0;
   }
 
+  .media-bay.source-available {
+    cursor: pointer;
+  }
+
+  .compact-source {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+
+  .compact-source:disabled {
+    cursor: default;
+  }
+
   .artwork {
+    position: relative;
+    z-index: 2;
     width: 24px;
     height: 24px;
     flex: 0 0 24px;
     border-radius: 5px;
     object-fit: cover;
     background: var(--on-surface-raised);
+    pointer-events: none;
   }
 
   .artwork-fallback {
@@ -563,6 +616,8 @@
   }
 
   .media-title {
+    position: relative;
+    z-index: 2;
     min-width: 0;
     flex: 1;
     overflow: hidden;
@@ -581,6 +636,8 @@
   }
 
   .media-btn {
+    position: relative;
+    z-index: 3;
     width: 20px;
     height: 30px;
     flex: 0 0 20px;

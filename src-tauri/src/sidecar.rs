@@ -11,17 +11,10 @@ use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
-use windows::Win32::{
-    Foundation::CloseHandle,
-    System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    },
-    UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
-        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW,
-        WS_EX_TOOLWINDOW,
-    },
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 pub const SIDECAR_LABEL: &str = "sidecar";
@@ -29,6 +22,10 @@ pub const SIDECAR_WIDTH_LOGICAL: u32 = 288;
 pub const SIDECAR_HEIGHT_LOGICAL: u32 = 44;
 pub const LEFT_MARGIN_LOGICAL: i32 = 5;
 pub const BOTTOM_MARGIN_LOGICAL: i32 = 4;
+pub const MEDIA_POPOVER_LABEL: &str = "media-popover";
+pub const MEDIA_POPOVER_WIDTH_LOGICAL: u32 = 288;
+pub const MEDIA_POPOVER_HEIGHT_LOGICAL: u32 = 108;
+pub const MEDIA_POPOVER_GAP_LOGICAL: i32 = 6;
 // Stable package-family application identities discovered from this machine's
 // registered Start apps. Versioned WindowsApps paths are deliberately avoided.
 const CHATGPT_APP_ID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
@@ -171,7 +168,57 @@ pub fn anchor(app: &AppHandle) -> Result<(), String> {
     window
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|error| error.to_string())?;
+    anchor_visible_media_popover(app)?;
     ensure_topmost(&window)
+}
+
+fn anchor_visible_media_popover(app: &AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(MEDIA_POPOVER_LABEL) else {
+        return Ok(());
+    };
+    if window.is_visible().map_err(|error| error.to_string())? {
+        anchor_media_popover(app)?;
+    }
+    Ok(())
+}
+
+fn anchor_media_popover(app: &AppHandle) -> Result<(), String> {
+    let sidecar = app
+        .get_webview_window(SIDECAR_LABEL)
+        .ok_or_else(|| "sidecar window is unavailable".to_string())?;
+    let popover = app
+        .get_webview_window(MEDIA_POPOVER_LABEL)
+        .ok_or_else(|| "media popover window is unavailable".to_string())?;
+    popover
+        .set_size(LogicalSize::new(
+            MEDIA_POPOVER_WIDTH_LOGICAL as f64,
+            MEDIA_POPOVER_HEIGHT_LOGICAL as f64,
+        ))
+        .map_err(|error| error.to_string())?;
+
+    let sidecar_position = sidecar
+        .outer_position()
+        .map_err(|error| error.to_string())?;
+    let popover_size = popover.outer_size().map_err(|error| error.to_string())?;
+    let scale = sidecar.scale_factor().map_err(|error| error.to_string())?;
+    let gap = (MEDIA_POPOVER_GAP_LOGICAL as f64 * scale).round() as i32;
+    let screen_top = sidecar
+        .primary_monitor()
+        .map_err(|error| error.to_string())?
+        .map(|monitor| monitor.position().y)
+        .unwrap_or(i32::MIN);
+    let (x, y) = media_popover_position(
+        sidecar_position.x,
+        sidecar_position.y,
+        popover_size.height,
+        gap,
+        screen_top,
+    );
+
+    popover
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|error| error.to_string())?;
+    ensure_topmost(&popover)
 }
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
@@ -189,6 +236,28 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
     anchor(app)?;
     window.show().map_err(|error| error.to_string())?;
     ensure_topmost(&window)
+}
+
+pub fn show_media_popover(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window(MEDIA_POPOVER_LABEL)
+        .ok_or_else(|| "media popover window is unavailable".to_string())?;
+
+    if window.is_visible().map_err(|error| error.to_string())? {
+        return anchor_media_popover(app);
+    }
+
+    apply_nonactivating_tool_window_style(&window)?;
+    anchor_media_popover(app)?;
+    window.show().map_err(|error| error.to_string())?;
+    ensure_topmost(&window)
+}
+
+pub fn hide_media_popover(app: &AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window(MEDIA_POPOVER_LABEL)
+        .ok_or_else(|| "media popover window is unavailable".to_string())?;
+    window.hide().map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]
@@ -220,11 +289,28 @@ fn ensure_topmost(window: &tauri::WebviewWindow) -> Result<(), String> {
 
 #[cfg(windows)]
 pub fn apply_tool_window_style(window: &tauri::WebviewWindow) -> Result<(), String> {
+    apply_shell_window_style(window, false)
+}
+
+#[cfg(windows)]
+fn apply_nonactivating_tool_window_style(window: &tauri::WebviewWindow) -> Result<(), String> {
+    apply_shell_window_style(window, true)
+}
+
+#[cfg(windows)]
+fn apply_shell_window_style(
+    window: &tauri::WebviewWindow,
+    nonactivating: bool,
+) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
 
     unsafe {
         let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        let shell_style = tool_window_ex_style(current);
+        let shell_style = if nonactivating {
+            nonactivating_tool_window_ex_style(current)
+        } else {
+            tool_window_ex_style(current)
+        };
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, shell_style as isize);
         SetWindowPos(
             hwnd,
@@ -246,8 +332,18 @@ fn tool_window_ex_style(current: u32) -> u32 {
     (current | WS_EX_TOOLWINDOW.0) & !WS_EX_APPWINDOW.0
 }
 
+#[cfg(windows)]
+fn nonactivating_tool_window_ex_style(current: u32) -> u32 {
+    tool_window_ex_style(current) | WS_EX_NOACTIVATE.0
+}
+
 #[cfg(not(windows))]
 pub fn apply_tool_window_style(_window: &tauri::WebviewWindow) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn apply_nonactivating_tool_window_style(_window: &tauri::WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
@@ -257,6 +353,7 @@ pub fn toggle(app: &AppHandle) -> Result<bool, String> {
         .ok_or_else(|| "sidecar window is unavailable".to_string())?;
 
     if window.is_visible().map_err(|error| error.to_string())? {
+        let _ = hide_media_popover(app);
         window.hide().map_err(|error| error.to_string())?;
         Ok(false)
     } else {
@@ -285,51 +382,25 @@ fn anchored_position(
     (x, y)
 }
 
-#[cfg(windows)]
-pub fn is_localsend_running() -> bool {
-    // A native snapshot is substantially cheaper than spawning tasklist repeatedly.
-    unsafe {
-        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
-            return false;
-        };
-        let mut entry = PROCESSENTRY32W {
-            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-            ..Default::default()
-        };
-        let mut running = false;
-
-        if Process32FirstW(snapshot, &mut entry).is_ok() {
-            loop {
-                let length = entry
-                    .szExeFile
-                    .iter()
-                    .position(|character| *character == 0)
-                    .unwrap_or(entry.szExeFile.len());
-                let name = String::from_utf16_lossy(&entry.szExeFile[..length]);
-                if name.eq_ignore_ascii_case("localsend_app.exe") {
-                    running = true;
-                    break;
-                }
-                if Process32NextW(snapshot, &mut entry).is_err() {
-                    break;
-                }
-            }
-        }
-
-        let _ = CloseHandle(snapshot);
-        running
-    }
-}
-
-#[cfg(not(windows))]
-pub fn is_localsend_running() -> bool {
-    false
+fn media_popover_position(
+    sidecar_x: i32,
+    sidecar_y: i32,
+    popover_height: u32,
+    gap: i32,
+    screen_top: i32,
+) -> (i32, i32) {
+    let y = sidecar_y
+        .saturating_sub(popover_height as i32)
+        .saturating_sub(gap)
+        .max(screen_top);
+    (sidecar_x, y)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        anchored_position, BOTTOM_MARGIN_LOGICAL, LEFT_MARGIN_LOGICAL, SIDECAR_HEIGHT_LOGICAL,
+        anchored_position, media_popover_position, BOTTOM_MARGIN_LOGICAL, LEFT_MARGIN_LOGICAL,
+        MEDIA_POPOVER_GAP_LOGICAL, MEDIA_POPOVER_HEIGHT_LOGICAL, SIDECAR_HEIGHT_LOGICAL,
         SIDECAR_WIDTH_LOGICAL,
     };
 
@@ -380,14 +451,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn places_media_popover_directly_above_the_actual_sidecar_rectangle() {
+        assert_eq!(
+            media_popover_position(
+                8,
+                1128,
+                MEDIA_POPOVER_HEIGHT_LOGICAL * 3 / 2,
+                MEDIA_POPOVER_GAP_LOGICAL * 3 / 2,
+                0,
+            ),
+            (8, 957)
+        );
+        assert_eq!(media_popover_position(-1275, 50, 108, 6, 40), (-1275, 40));
+    }
+
     #[cfg(windows)]
     #[test]
     fn tool_window_style_suppresses_normal_app_switching_presence() {
-        use super::tool_window_ex_style;
-        use windows::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
+        use super::{nonactivating_tool_window_ex_style, tool_window_ex_style};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        };
 
         let style = tool_window_ex_style(WS_EX_APPWINDOW.0);
         assert_ne!(style & WS_EX_TOOLWINDOW.0, 0);
         assert_eq!(style & WS_EX_APPWINDOW.0, 0);
+
+        let popover_style = nonactivating_tool_window_ex_style(WS_EX_APPWINDOW.0);
+        assert_ne!(popover_style & WS_EX_TOOLWINDOW.0, 0);
+        assert_ne!(popover_style & WS_EX_NOACTIVATE.0, 0);
+        assert_eq!(popover_style & WS_EX_APPWINDOW.0, 0);
     }
 }

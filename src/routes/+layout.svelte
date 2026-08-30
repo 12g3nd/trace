@@ -4,9 +4,10 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { initDb } from '$lib/db';
   import { refresh } from '$lib/stores';
+  import MediaPopover from '$lib/components/MediaPopover.svelte';
   import OrbitSidecar from '$lib/components/OrbitSidecar.svelte';
 
-  let windowKind: 'loading' | 'main' | 'sidecar' = 'loading';
+  let windowKind: 'loading' | 'main' | 'sidecar' | 'media-popover' = 'loading';
   let ready = false;
   let loading = true;
   let initError: string | null = null;
@@ -28,7 +29,8 @@
 
   onMount(() => {
     try {
-      windowKind = getCurrentWindow().label === 'sidecar' ? 'sidecar' : 'main';
+      const label = getCurrentWindow().label;
+      windowKind = label === 'sidecar' || label === 'media-popover' ? label : 'main';
     } catch {
       // Browser development always renders the main Trace application.
       windowKind = 'main';
@@ -40,6 +42,8 @@
 
 {#if windowKind === 'sidecar'}
   <OrbitSidecar />
+{:else if windowKind === 'media-popover'}
+  <MediaPopover />
 {:else if windowKind === 'main' && ready}
   <slot />
 {:else if windowKind === 'main' && initError}

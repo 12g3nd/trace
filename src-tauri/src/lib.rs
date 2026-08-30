@@ -69,13 +69,6 @@ fn launch_app(app: String, state: tauri::State<'_, AppState>) -> Result<(), Stri
 }
 
 #[tauri::command]
-async fn is_localsend_running() -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(sidecar::is_localsend_running)
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 async fn get_media_state(
     artwork_key: Option<String>,
     state: tauri::State<'_, AppState>,
@@ -86,6 +79,19 @@ async fn get_media_state(
             .lock()
             .map_err(|_| "media controller lock is unavailable".to_string())?
             .state(artwork_key.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn open_media_source(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let media = Arc::clone(&state.media);
+    tauri::async_runtime::spawn_blocking(move || {
+        media
+            .lock()
+            .map_err(|_| "media controller lock is unavailable".to_string())?
+            .open_source()
     })
     .await
     .map_err(|error| error.to_string())?
@@ -124,6 +130,16 @@ fn open_task_manager() -> Result<(), String> {
 #[tauri::command]
 fn reanchor_sidecar(app: tauri::AppHandle) -> Result<(), String> {
     sidecar::anchor(&app)
+}
+
+#[tauri::command]
+fn show_media_popover(app: tauri::AppHandle) -> Result<(), String> {
+    sidecar::show_media_popover(&app)
+}
+
+#[tauri::command]
+fn hide_media_popover(app: tauri::AppHandle) -> Result<(), String> {
+    sidecar::hide_media_popover(&app)
 }
 
 #[tauri::command]
@@ -256,12 +272,14 @@ pub fn run() {
             get_shortcut_diagnostics,
             show_trace,
             launch_app,
-            is_localsend_running,
             get_media_state,
             media_command,
+            open_media_source,
             get_load_state,
             open_task_manager,
             reanchor_sidecar,
+            show_media_popover,
+            hide_media_popover,
             toggle_sidecar,
             show_sidecar_menu,
             quit_trace

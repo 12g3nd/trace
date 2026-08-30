@@ -50,7 +50,6 @@
   /* ── Chrome / hairlines ─────────────────────────────────────────────────  */
   --on-hairline:        rgba(232, 239, 245, 0.10);
   --on-hairline-strong: rgba(232, 239, 245, 0.20);
-  --on-sidecar-shadow:  rgba(0, 0, 0, 0.34);
 
   /* ── Typography · DESIGN.md §5 ─────────────────────────────────────────  */
   --on-font-interface:  'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;

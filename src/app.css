@@ -32,8 +32,8 @@ html, body {
   user-select: none;
 }
 
-html.sidecar-document,
-html.sidecar-document body {
+html.shell-document,
+html.shell-document body {
   background: transparent;
 }
 

@@ -16,10 +16,10 @@ The Sidecar provides:
 
 - Local launch/focus controls for **LocalSend**, **ChatGPT**, and **Claude** using their installed Windows app identities.
 - A quiet **Trace** doorway that summons the main window and focuses its normal capture workflow.
-- A switchable **Media** bay for the current Windows system media session, with album art, title, play/pause, and next when supported.
+- A switchable **Media** bay for the current Windows system media session, with album art, title, play/pause, and next when supported. Hovering it intentionally opens a larger, non-activating controller with artist metadata and previous/play-pause/next controls; clicking either player's non-control surface focuses the source app.
 - A minimal **Load** bay showing native Windows memory use and CPU load; click it to open Task Manager.
 
-The selected Trace/Media/Load bay persists locally. Use the quiet chevrons or the mouse wheel over the bay to cycle it. Media is read through Windows GSMTC, while Load uses lightweight native system APIs and only polls while visible. The Sidecar intentionally never queries or displays TODO contents, task metadata, or task counts.
+The selected Trace/Media/Load bay persists locally. Use the quiet chevrons or the mouse wheel over the bay to cycle it. Media is read through one shared Windows GSMTC refresh path, while Load uses lightweight native system APIs and only polls while visible. The Sidecar and media popover intentionally never query or display TODO contents, task metadata, or task counts.
 
 Right-click Sidecar for **Open Trace**, **Re-anchor Sidecar**, **Start with Windows**, and **Quit Trace**. Trace has no tray icon and does not modify or reserve the Windows taskbar.
 
