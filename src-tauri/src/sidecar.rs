@@ -6,7 +6,7 @@ use std::{
     sync::Mutex,
 };
 
-use tauri::{AppHandle, Manager, PhysicalPosition};
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -18,14 +18,17 @@ use windows::Win32::{
         TH32CS_SNAPPROCESS,
     },
     UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
+        SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW,
+        WS_EX_TOOLWINDOW,
     },
 };
 
 pub const SIDECAR_LABEL: &str = "sidecar";
-pub const LEFT_MARGIN_LOGICAL: i32 = 6;
-pub const BOTTOM_MARGIN_LOGICAL: i32 = 5;
+pub const SIDECAR_WIDTH_LOGICAL: u32 = 288;
+pub const SIDECAR_HEIGHT_LOGICAL: u32 = 44;
+pub const LEFT_MARGIN_LOGICAL: i32 = 5;
+pub const BOTTOM_MARGIN_LOGICAL: i32 = 4;
 // Stable package-family application identities discovered from this machine's
 // registered Start apps. Versioned WindowsApps paths are deliberately avoided.
 const CHATGPT_APP_ID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
@@ -136,6 +139,12 @@ pub fn anchor(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window(SIDECAR_LABEL)
         .ok_or_else(|| "sidecar window is unavailable".to_string())?;
+    window
+        .set_size(LogicalSize::new(
+            SIDECAR_WIDTH_LOGICAL as f64,
+            SIDECAR_HEIGHT_LOGICAL as f64,
+        ))
+        .map_err(|error| error.to_string())?;
     let monitor = window
         .primary_monitor()
         .map_err(|error| error.to_string())?
@@ -161,16 +170,52 @@ pub fn anchor(app: &AppHandle) -> Result<(), String> {
 
     window
         .set_position(PhysicalPosition::new(x, y))
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    ensure_topmost(&window)
 }
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window(SIDECAR_LABEL)
         .ok_or_else(|| "sidecar window is unavailable".to_string())?;
+
+    // Reapplying SWP_FRAMECHANGED to an already-visible WebView can remove its
+    // native surface. Re-anchor is the idempotent restore path for repeat launches.
+    if window.is_visible().map_err(|error| error.to_string())? {
+        return anchor(app);
+    }
+
     apply_tool_window_style(&window)?;
     anchor(app)?;
-    window.show().map_err(|error| error.to_string())
+    window.show().map_err(|error| error.to_string())?;
+    ensure_topmost(&window)
+}
+
+#[cfg(windows)]
+fn ensure_topmost(window: &tauri::WebviewWindow) -> Result<(), String> {
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            Some(HWND_TOPMOST),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn ensure_topmost(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .set_always_on_top(true)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(windows)]
@@ -215,8 +260,7 @@ pub fn toggle(app: &AppHandle) -> Result<bool, String> {
         window.hide().map_err(|error| error.to_string())?;
         Ok(false)
     } else {
-        anchor(app)?;
-        window.show().map_err(|error| error.to_string())?;
+        show(app)?;
         Ok(true)
     }
 }
@@ -284,23 +328,56 @@ pub fn is_localsend_running() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::anchored_position;
+    use super::{
+        anchored_position, BOTTOM_MARGIN_LOGICAL, LEFT_MARGIN_LOGICAL, SIDECAR_HEIGHT_LOGICAL,
+        SIDECAR_WIDTH_LOGICAL,
+    };
 
     #[test]
     fn anchors_inside_the_bottom_left_of_the_full_monitor_bounds() {
         assert_eq!(
-            anchored_position(0, 0, 1920, 1080, 288, 48, 6, 5),
-            (6, 1027)
+            anchored_position(
+                0,
+                0,
+                1920,
+                1080,
+                SIDECAR_WIDTH_LOGICAL,
+                SIDECAR_HEIGHT_LOGICAL,
+                LEFT_MARGIN_LOGICAL,
+                BOTTOM_MARGIN_LOGICAL,
+            ),
+            (5, 1032)
         );
     }
 
     #[test]
     fn respects_offset_monitor_coordinates_and_clamps_small_monitors() {
         assert_eq!(
-            anchored_position(-1280, 40, 1280, 1024, 288, 48, 6, 5),
-            (-1274, 1011)
+            anchored_position(
+                -1280,
+                40,
+                1280,
+                1024,
+                SIDECAR_WIDTH_LOGICAL,
+                SIDECAR_HEIGHT_LOGICAL,
+                LEFT_MARGIN_LOGICAL,
+                BOTTOM_MARGIN_LOGICAL,
+            ),
+            (-1275, 1016)
         );
-        assert_eq!(anchored_position(10, 20, 100, 40, 288, 48, 6, 5), (10, 20));
+        assert_eq!(
+            anchored_position(
+                10,
+                20,
+                100,
+                40,
+                SIDECAR_WIDTH_LOGICAL,
+                SIDECAR_HEIGHT_LOGICAL,
+                LEFT_MARGIN_LOGICAL,
+                BOTTOM_MARGIN_LOGICAL,
+            ),
+            (10, 20)
+        );
     }
 
     #[cfg(windows)]

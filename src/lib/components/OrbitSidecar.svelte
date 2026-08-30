@@ -342,7 +342,7 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 4px;
+    padding: 2px 4px;
     overflow: hidden;
     color: var(--on-text);
     background: rgba(11, 23, 49, 0.92);

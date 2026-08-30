@@ -10,7 +10,7 @@ It is tailored for my personal machine and the Orbit Noir desktop theme (matchin
 
 ## Orbit Sidecar
 
-Trace also runs a compact 288×48, always-on-top **Orbit Sidecar** in the bottom-left rail plane of the primary monitor's full physical bounds. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry. The full Trace window is also treated as a focusable utility palette, so summoning it does not add another taskbar or Alt+Tab presence.
+Trace also runs a compact 288×44, always-on-top **Orbit Sidecar** in the bottom-left rail plane of the primary monitor's full physical bounds. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry. The full Trace window is a single-instance, always-on-top utility palette by default, so summoning it remains immediate and does not add another taskbar or Alt+Tab presence; its pin control can temporarily release or restore topmost behavior.
 
 The Sidecar provides:
 

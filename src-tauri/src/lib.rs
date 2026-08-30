@@ -195,6 +195,23 @@ fn show_main_window(app: &tauri::AppHandle) -> Result<(), String> {
     window.emit("summon", ()).map_err(|error| error.to_string())
 }
 
+fn launch_starts_minimized(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| arg == "--minimized" || arg == "--hidden" || arg == "-m")
+}
+
+fn handle_second_instance(app: &tauri::AppHandle, args: Vec<String>) {
+    if let Err(error) = sidecar::show(app) {
+        eprintln!("[Trace] Failed to restore Sidecar for second launch: {error}");
+    }
+
+    if !launch_starts_minimized(&args) {
+        if let Err(error) = show_main_window(app) {
+            eprintln!("[Trace] Failed to show main window for second launch: {error}");
+        }
+    }
+}
+
 fn toggle_window(window: &tauri::WebviewWindow) {
     if window.is_visible().unwrap_or(false) && window.is_focused().unwrap_or(false) {
         let _ = window.emit(MAIN_DISMISS_EVENT, ());
@@ -210,6 +227,10 @@ fn toggle_window(window: &tauri::WebviewWindow) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Tauri requires the single-instance plugin to be registered first.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            handle_second_instance(app, args);
+        }))
         .manage(AppState::default())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -247,9 +268,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let args: Vec<String> = std::env::args().collect();
-            let start_minimized = args
-                .iter()
-                .any(|arg| arg == "--minimized" || arg == "--hidden" || arg == "-m");
+            let start_minimized = launch_starts_minimized(&args);
 
             if !start_minimized {
                 if let Some(window) = app.get_webview_window("main") {
@@ -364,4 +383,23 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("failed to start Trace");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::launch_starts_minimized;
+
+    #[test]
+    fn recognizes_all_minimized_launch_flags_in_any_argument_position() {
+        for flag in ["--minimized", "--hidden", "-m"] {
+            let args = vec!["trace.exe".to_string(), flag.to_string()];
+            assert!(launch_starts_minimized(&args));
+        }
+    }
+
+    #[test]
+    fn treats_an_ordinary_launch_as_interactive() {
+        let args = vec!["trace.exe".to_string()];
+        assert!(!launch_starts_minimized(&args));
+    }
 }

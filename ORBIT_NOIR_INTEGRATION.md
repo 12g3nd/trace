@@ -59,14 +59,14 @@ These belong to Trace specifically and would not propagate to other Orbit Noir m
 
 ## Orbit Sidecar
 
-The Sidecar is Trace's smallest and quietest surface: a fixed 288×48 frameless shell island anchored 6 logical pixels from the left and 5 logical pixels from the bottom of the primary monitor's full bounds. Its restrained translucent Orbit ground, hairline border, 12px outer radius, and 150ms feedback place it in the same visual plane as the Orbit Rail without reserving or modifying Windows work area. Persistent 26px no-drag navigation hitboxes sit above a clipped, isolated bay transition layer so pointer targeting does not change with content.
+The Sidecar is Trace's smallest and quietest surface: a fixed 288×44 frameless shell island anchored 5 logical pixels from the left and 4 logical pixels from the bottom of the primary monitor's full bounds. Its restrained translucent Orbit ground, hairline border, 12px outer radius, and 150ms feedback place it in the same visual plane as the Orbit Rail without reserving or modifying Windows work area. Persistent 26px no-drag navigation hitboxes sit above a clipped, isolated bay transition layer so pointer targeting does not change with content.
 
 - Three icon-only launchers use the supplied LocalSend, ChatGPT, and Claude vectors to open the locally installed applications. Signal indicates that LocalSend is running; Moondust indicates that it is not.
 - The Trace bay is only a doorway into the main capture workflow. By design it has no database access and never displays task contents, dates, contexts, priorities, completion state, previews, or counts.
 - The Media bay reads the current Windows GSMTC session and limits itself to compact artwork, an ellipsized title, play/pause, and next. Missing sessions, metadata, artwork, or transport support collapse quietly.
 - The Load bay reads physical memory with `GlobalMemoryStatusEx` and CPU load from delta `GetSystemTimes` samples. It polls only while visible and opens Task Manager when clicked.
 - The active Trace/Media/Load bay is the only Sidecar preference and is stored in webview `localStorage`.
-- Both the Sidecar and main Trace utility carry `WS_EX_TOOLWINDOW` (and not `WS_EX_APPWINDOW`) and opt out of taskbar presence. The main utility still accepts focus when summoned; closing it requests an edit flush, then hides it without stopping Sidecar.
+- Both the Sidecar and main Trace utility carry `WS_EX_TOOLWINDOW` (and not `WS_EX_APPWINDOW`) and opt out of taskbar presence. The Sidecar explicitly restores native topmost z-order whenever shown or re-anchored. The single-instance main utility defaults to always-on-top, still accepts focus when summoned, and retains its pin control; closing it requests an edit flush, then hides it without stopping Sidecar.
 - Trace has no system-tray icon. A native Sidecar context menu provides Open Trace, re-anchor, autostart, and full-process quit actions.
 
 ## Task Links
