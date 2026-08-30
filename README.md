@@ -30,7 +30,7 @@ Right-click Sidecar for **Open Trace**, **Re-anchor Sidecar**, **Start with Wind
 Press **`Win+Shift+T`** (or **`Alt+Shift+T`**) anywhere on Windows. The window pops up with the cursor already focused. Type a task, press Enter, and press Escape to dismiss.
 
 ```text
-Message Michael about RC tomorrow ~ rc **
+Message X about RC tomorrow ~ rc **
 ```
 
 - **Task text**: Everything before `~`
