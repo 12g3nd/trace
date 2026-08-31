@@ -6,6 +6,10 @@ I built Trace to replace the plain `TODO.txt` scratchpad I kept open in Notepad.
 
 It is tailored for my personal machine and the Orbit Noir desktop theme (matching Lacquer and my terminal setup).
 
+Examples:
+<img width="301" height="165" alt="sidecar" src="https://github.com/user-attachments/assets/67a9c91a-ba23-4e4d-80f9-291594467e40" />
+<img width="198.5" height="302.5" alt="todo" src="https://github.com/user-attachments/assets/3904349e-af9a-43c9-ae61-94ecfe1caeba" />
+
 ---
 
 ## Orbit Sidecar
