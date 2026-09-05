@@ -447,27 +447,12 @@
   }
 
   .launcher-btn.running {
-    background: rgba(42, 148, 226, 0.5);
-    box-shadow:
-      0 0 12px rgba(74, 191, 255, 0.76),
-      inset 0 0 0 1px rgba(189, 233, 255, 0.82);
+    background: rgba(42, 148, 226, 0.22);
+    box-shadow: 0 0 8px rgba(74, 191, 255, 0.34);
   }
 
   .launcher-btn.running .launcher-icon {
     transform: scale(1.08);
-  }
-
-  .launcher-btn.running::after {
-    content: '';
-    position: absolute;
-    right: 2px;
-    bottom: 2px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    border: 1px solid #e6f8ff;
-    background: #42beff;
-    box-shadow: 0 0 8px rgba(94, 205, 255, 1);
   }
 
   .launcher-btn:disabled {
