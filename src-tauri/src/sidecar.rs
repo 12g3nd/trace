@@ -11,10 +11,18 @@ use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
+use windows::core::BOOL;
+#[cfg(windows)]
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+#[cfg(windows)]
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+#[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, SetWindowLongPtrW, SetWindowPos,
+    GWL_EXSTYLE, HWND_NOTOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 pub const SIDECAR_LABEL: &str = "sidecar";
@@ -28,10 +36,19 @@ pub const MEDIA_POPOVER_HEIGHT_LOGICAL: u32 = 108;
 pub const MEDIA_POPOVER_GAP_LOGICAL: i32 = 6;
 // Stable package-family application identities discovered from this machine's
 // registered Start apps. Versioned WindowsApps paths are deliberately avoided.
-const CHATGPT_APP_ID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
+const CODEX_APP_ID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
 const CLAUDE_APP_ID: &str = "Claude_pzs8sxrjxfjjc!Claude";
+const CODEX_PROCESS_NAME: &str = "chatgpt.exe";
+const CLAUDE_PROCESS_NAME: &str = "claude.exe";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherState {
+    pub codex_running: bool,
+    pub claude_running: bool,
+}
 
 #[derive(Clone, Debug)]
 enum LaunchTarget {
@@ -81,6 +98,12 @@ impl LauncherRegistry {
             .map(|_| ())
             .map_err(|error| format!("failed to launch {app}: {error}"))
     }
+
+    pub fn state(&self) -> LauncherState {
+        let process_names = running_process_names();
+        suppress_taskbar_buttons(&process_names);
+        launcher_state_from_process_names(process_names.iter().map(String::as_str))
+    }
 }
 
 fn discover_launchers() -> HashMap<String, LaunchTarget> {
@@ -90,7 +113,7 @@ fn discover_launchers() -> HashMap<String, LaunchTarget> {
         targets.insert("localsend".into(), LaunchTarget::Executable(path));
     }
 
-    targets.insert("chatgpt".into(), LaunchTarget::AppId(CHATGPT_APP_ID.into()));
+    targets.insert("codex".into(), LaunchTarget::AppId(CODEX_APP_ID.into()));
     targets.insert("claude".into(), LaunchTarget::AppId(CLAUDE_APP_ID.into()));
 
     targets
@@ -169,7 +192,7 @@ pub fn anchor(app: &AppHandle) -> Result<(), String> {
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|error| error.to_string())?;
     anchor_visible_media_popover(app)?;
-    ensure_topmost(&window)
+    ensure_taskbar_z_order(&window)
 }
 
 fn anchor_visible_media_popover(app: &AppHandle) -> Result<(), String> {
@@ -218,7 +241,7 @@ fn anchor_media_popover(app: &AppHandle) -> Result<(), String> {
     popover
         .set_position(PhysicalPosition::new(x, y))
         .map_err(|error| error.to_string())?;
-    ensure_topmost(&popover)
+    ensure_taskbar_z_order(&popover)
 }
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
@@ -235,7 +258,7 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
     apply_tool_window_style(&window)?;
     anchor(app)?;
     window.show().map_err(|error| error.to_string())?;
-    ensure_topmost(&window)
+    ensure_taskbar_z_order(&window)
 }
 
 pub fn show_media_popover(app: &AppHandle) -> Result<(), String> {
@@ -250,7 +273,7 @@ pub fn show_media_popover(app: &AppHandle) -> Result<(), String> {
     apply_nonactivating_tool_window_style(&window)?;
     anchor_media_popover(app)?;
     window.show().map_err(|error| error.to_string())?;
-    ensure_topmost(&window)
+    ensure_taskbar_z_order(&window)
 }
 
 pub fn hide_media_popover(app: &AppHandle) -> Result<(), String> {
@@ -261,13 +284,13 @@ pub fn hide_media_popover(app: &AppHandle) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn ensure_topmost(window: &tauri::WebviewWindow) -> Result<(), String> {
+fn ensure_taskbar_z_order(window: &tauri::WebviewWindow) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
 
     unsafe {
         SetWindowPos(
             hwnd,
-            Some(HWND_TOPMOST),
+            Some(HWND_NOTOPMOST),
             0,
             0,
             0,
@@ -281,10 +304,151 @@ fn ensure_topmost(window: &tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn ensure_topmost(window: &tauri::WebviewWindow) -> Result<(), String> {
+fn ensure_taskbar_z_order(window: &tauri::WebviewWindow) -> Result<(), String> {
     window
-        .set_always_on_top(true)
+        .set_always_on_top(false)
         .map_err(|error| error.to_string())
+}
+
+fn launcher_state_from_process_names<I, S>(process_names: I) -> LauncherState
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut state = LauncherState {
+        codex_running: false,
+        claude_running: false,
+    };
+
+    for process_name in process_names {
+        let process_name = process_name.as_ref();
+        state.codex_running |= process_name.eq_ignore_ascii_case(CODEX_PROCESS_NAME);
+        state.claude_running |= process_name.eq_ignore_ascii_case(CLAUDE_PROCESS_NAME);
+    }
+
+    state
+}
+
+#[cfg(windows)]
+fn running_process_names() -> Vec<String> {
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return Vec::new();
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut process_names = Vec::new();
+
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let length = entry
+                    .szExeFile
+                    .iter()
+                    .position(|character| *character == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                process_names.push(String::from_utf16_lossy(&entry.szExeFile[..length]));
+
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+
+        let _ = CloseHandle(snapshot);
+        process_names
+    }
+}
+
+#[cfg(not(windows))]
+fn running_process_names() -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(windows)]
+fn suppress_taskbar_buttons(process_names: &[String]) {
+    let tracked_processes = tracked_process_ids(process_names);
+    if tracked_processes.is_empty() {
+        return;
+    }
+
+    unsafe {
+        let _ = EnumWindows(
+            Some(suppress_taskbar_button_for_tracked_window),
+            LPARAM(&tracked_processes as *const Vec<u32> as isize),
+        );
+    }
+}
+
+#[cfg(not(windows))]
+fn suppress_taskbar_buttons(_process_names: &[String]) {}
+
+#[cfg(windows)]
+fn tracked_process_ids(_process_names: &[String]) -> Vec<u32> {
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return Vec::new();
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut process_ids = Vec::new();
+
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let length = entry
+                    .szExeFile
+                    .iter()
+                    .position(|character| *character == 0)
+                    .unwrap_or(entry.szExeFile.len());
+                let name = String::from_utf16_lossy(&entry.szExeFile[..length]);
+                if name.eq_ignore_ascii_case(CODEX_PROCESS_NAME)
+                    || name.eq_ignore_ascii_case(CLAUDE_PROCESS_NAME)
+                {
+                    process_ids.push(entry.th32ProcessID);
+                }
+
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+
+        let _ = CloseHandle(snapshot);
+        process_ids
+    }
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn suppress_taskbar_button_for_tracked_window(
+    window: HWND,
+    data: LPARAM,
+) -> BOOL {
+    let tracked_processes = &*(data.0 as *const Vec<u32>);
+    let mut process_id = 0;
+    GetWindowThreadProcessId(window, Some(&mut process_id));
+    if !tracked_processes.contains(&process_id) {
+        return BOOL(1);
+    }
+
+    let current = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
+    let hidden_from_taskbar = tool_window_ex_style(current);
+    if hidden_from_taskbar != current {
+        SetWindowLongPtrW(window, GWL_EXSTYLE, hidden_from_taskbar as isize);
+        let _ = SetWindowPos(
+            window,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        );
+    }
+
+    BOOL(1)
 }
 
 #[cfg(windows)]
@@ -399,10 +563,19 @@ fn media_popover_position(
 #[cfg(test)]
 mod tests {
     use super::{
-        anchored_position, media_popover_position, BOTTOM_MARGIN_LOGICAL, LEFT_MARGIN_LOGICAL,
-        MEDIA_POPOVER_GAP_LOGICAL, MEDIA_POPOVER_HEIGHT_LOGICAL, SIDECAR_HEIGHT_LOGICAL,
-        SIDECAR_WIDTH_LOGICAL,
+        anchored_position, launcher_state_from_process_names, media_popover_position,
+        BOTTOM_MARGIN_LOGICAL, LEFT_MARGIN_LOGICAL, MEDIA_POPOVER_GAP_LOGICAL,
+        MEDIA_POPOVER_HEIGHT_LOGICAL, SIDECAR_HEIGHT_LOGICAL, SIDECAR_WIDTH_LOGICAL,
     };
+
+    #[test]
+    fn reports_codex_and_claude_from_their_desktop_processes() {
+        let state =
+            launcher_state_from_process_names(["explorer.exe", "ChatGPT.exe", "claude.exe"]);
+
+        assert!(state.codex_running);
+        assert!(state.claude_running);
+    }
 
     #[test]
     fn anchors_inside_the_bottom_left_of_the_full_monitor_bounds() {

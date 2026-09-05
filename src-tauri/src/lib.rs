@@ -69,6 +69,11 @@ fn launch_app(app: String, state: tauri::State<'_, AppState>) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn get_launcher_state(state: tauri::State<'_, AppState>) -> sidecar::LauncherState {
+    state.launchers.state()
+}
+
+#[tauri::command]
 async fn get_media_state(
     artwork_key: Option<String>,
     state: tauri::State<'_, AppState>,
@@ -272,6 +277,7 @@ pub fn run() {
             get_shortcut_diagnostics,
             show_trace,
             launch_app,
+            get_launcher_state,
             get_media_state,
             media_command,
             open_media_source,

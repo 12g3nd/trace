@@ -20,7 +20,12 @@
     type SidecarBay,
   } from '$lib/sidecar-state';
 
-  type Launcher = 'localsend' | 'chatgpt' | 'claude';
+  type Launcher = 'localsend' | 'codex' | 'claude';
+
+  interface LauncherState {
+    codexRunning: boolean;
+    claudeRunning: boolean;
+  }
 
   interface LoadState {
     memoryUsedGib: number;
@@ -30,6 +35,7 @@
 
   let bay: SidecarBay = 'trace';
   let unavailableLaunchers: Launcher[] = [];
+  let launcherState: LauncherState = { codexRunning: false, claudeRunning: false };
   let media = EMPTY_MEDIA;
   let load: LoadState | null = null;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -80,11 +86,13 @@
 
     if (bay === 'media') void refreshMedia();
     if (bay === 'load') void refreshLoad();
+    void refreshLauncherState();
 
     pollTimer = setInterval(() => {
       tick += 1;
       if (bay === 'media') void refreshMedia();
       if (bay === 'load' && tick % 2 === 0) void refreshLoad();
+      if (tick % 2 === 0) void refreshLauncherState();
       if (tick % 15 === 0) void refreshAnchor();
     }, 1000);
 
@@ -167,14 +175,30 @@
     return !unavailableLaunchers.includes(launcher);
   }
 
+  function launcherRunning(launcher: Launcher): boolean {
+    return (launcher === 'codex' && launcherState.codexRunning)
+      || (launcher === 'claude' && launcherState.claudeRunning);
+  }
+
   function launcherTitle(launcher: Launcher, name: string): string {
-    return launcherEnabled(launcher) ? name : `${name} is unavailable`;
+    if (!launcherEnabled(launcher)) return `${name} is unavailable`;
+    return launcherRunning(launcher) ? `${name} is open` : name;
+  }
+
+  async function refreshLauncherState() {
+    try {
+      launcherState = await invoke<LauncherState>('get_launcher_state');
+    } catch (error) {
+      console.warn('[Trace Sidecar] Could not read launcher state:', error);
+      launcherState = { codexRunning: false, claudeRunning: false };
+    }
   }
 
   async function openLauncher(launcher: Launcher) {
     if (!launcherEnabled(launcher)) return;
     try {
       await invoke('launch_app', { app: launcher });
+      setTimeout(refreshLauncherState, 500);
     } catch (error) {
       console.warn(`[Trace Sidecar] Could not launch ${launcher}:`, error);
       unavailableLaunchers = [...new Set([...unavailableLaunchers, launcher])];
@@ -259,19 +283,21 @@
 
     <button
       class="launcher-btn"
-      disabled={!launcherEnabled('chatgpt')}
-      title={launcherTitle('chatgpt', 'ChatGPT')}
-      aria-label="ChatGPT"
-      on:click={() => openLauncher('chatgpt')}
+      class:running={launcherRunning('codex')}
+      disabled={!launcherEnabled('codex')}
+      title={launcherTitle('codex', 'Codex')}
+      aria-label={launcherTitle('codex', 'Codex')}
+      on:click={() => openLauncher('codex')}
     >
       <img class="launcher-icon chatgpt-icon" src={chatgptIcon} alt="" />
     </button>
 
     <button
       class="launcher-btn"
+      class:running={launcherRunning('claude')}
       disabled={!launcherEnabled('claude')}
       title={launcherTitle('claude', 'Claude')}
-      aria-label="Claude"
+      aria-label={launcherTitle('claude', 'Claude')}
       on:click={() => openLauncher('claude')}
     >
       <img class="launcher-icon claude-icon" src={claudeIcon} alt="" />
@@ -425,6 +451,23 @@
   .launcher-btn:hover:not(:disabled),
   .launcher-btn:focus-visible {
     background: rgba(232, 239, 245, 0.08);
+  }
+
+  .launcher-btn.running {
+    background: rgba(42, 119, 183, 0.2);
+    box-shadow: inset 0 0 0 1px rgba(112, 192, 240, 0.27);
+  }
+
+  .launcher-btn.running::after {
+    content: '';
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: #86d2ff;
+    box-shadow: 0 0 6px rgba(134, 210, 255, 0.95);
   }
 
   .launcher-btn:disabled {

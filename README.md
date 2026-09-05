@@ -14,11 +14,11 @@ Examples:
 
 ## Orbit Sidecar
 
-Trace also runs a compact 288×44, always-on-top **Orbit Sidecar** in the bottom-left rail plane of the primary monitor's full physical bounds. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry. The full Trace window is a single-instance, always-on-top utility palette by default, so summoning it remains immediate and does not add another taskbar or Alt+Tab presence; its pin control can temporarily release or restore topmost behavior.
+Trace also runs a compact **Orbit Sidecar** in the bottom-left taskbar plane of the primary monitor. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry. It follows the normal taskbar z-order, so it does not overlay full-screen apps. The full Trace window is a single-instance, always-on-top utility palette by default, so summoning it remains immediate and does not add another taskbar or Alt+Tab presence; its pin control can temporarily release or restore topmost behavior.
 
 The Sidecar provides:
 
-- Local launch/focus controls for **LocalSend**, **ChatGPT**, and **Claude** using their installed Windows app identities.
+- Local launch/focus controls for **LocalSend**, **Codex**, and **Claude** using their installed Windows app identities. Open Codex and Claude windows are removed from the Windows taskbar; their Sidecar buttons receive a blue active marker instead.
 - A quiet **Trace** doorway that summons the main window and focuses its normal capture workflow.
 - A switchable **Media** bay for the current Windows system media session, with album art, title, play/pause, and next when supported. Hovering it intentionally opens a larger, non-activating controller with artist metadata and previous/play-pause/next controls; clicking either player's non-control surface focuses the source app.
 - A minimal **Load** bay showing native Windows memory use and CPU load; click it to open Task Manager.
