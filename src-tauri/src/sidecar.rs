@@ -83,20 +83,18 @@ impl LauncherRegistry {
             .cloned()
             .ok_or_else(|| format!("{app} is not installed or could not be discovered"))?;
 
-        let mut command = match target {
-            LaunchTarget::Executable(path) => Command::new(path),
-            LaunchTarget::AppId(app_id) => {
-                let mut command = Command::new("explorer.exe");
-                command.arg(format!("shell:AppsFolder\\{app_id}"));
+        match target {
+            LaunchTarget::Executable(path) => {
+                let mut command = Command::new(path);
+                configure_background_command(&mut command);
                 command
+                    .spawn()
+                    .map(|_| ())
+                    .map_err(|error| format!("failed to launch {app}: {error}"))
             }
-        };
-
-        configure_background_command(&mut command);
-        command
-            .spawn()
-            .map(|_| ())
-            .map_err(|error| format!("failed to launch {app}: {error}"))
+            LaunchTarget::AppId(app_id) => crate::media::activate_app_user_model_id(&app_id)
+                .map_err(|error| format!("failed to activate {app}: {error}")),
+        }
     }
 
     pub fn state(&self) -> LauncherState {

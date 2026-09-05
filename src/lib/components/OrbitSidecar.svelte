@@ -15,17 +15,15 @@
   } from '$lib/media-state';
   import {
     cycleSidecarBay,
+    isLauncherRunning,
     loadSidecarBay,
     saveSidecarBay,
+    type SidecarLauncher,
+    type SidecarLauncherState,
     type SidecarBay,
   } from '$lib/sidecar-state';
 
-  type Launcher = 'localsend' | 'codex' | 'claude';
-
-  interface LauncherState {
-    codexRunning: boolean;
-    claudeRunning: boolean;
-  }
+  type Launcher = SidecarLauncher;
 
   interface LoadState {
     memoryUsedGib: number;
@@ -35,7 +33,7 @@
 
   let bay: SidecarBay = 'trace';
   let unavailableLaunchers: Launcher[] = [];
-  let launcherState: LauncherState = { codexRunning: false, claudeRunning: false };
+  let launcherState: SidecarLauncherState = { codexRunning: false, claudeRunning: false };
   let media = EMPTY_MEDIA;
   let load: LoadState | null = null;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -175,19 +173,14 @@
     return !unavailableLaunchers.includes(launcher);
   }
 
-  function launcherRunning(launcher: Launcher): boolean {
-    return (launcher === 'codex' && launcherState.codexRunning)
-      || (launcher === 'claude' && launcherState.claudeRunning);
-  }
-
   function launcherTitle(launcher: Launcher, name: string): string {
     if (!launcherEnabled(launcher)) return `${name} is unavailable`;
-    return launcherRunning(launcher) ? `${name} is open` : name;
+    return isLauncherRunning(launcher, launcherState) ? `${name} is open` : name;
   }
 
   async function refreshLauncherState() {
     try {
-      launcherState = await invoke<LauncherState>('get_launcher_state');
+      launcherState = await invoke<SidecarLauncherState>('get_launcher_state');
     } catch (error) {
       console.warn('[Trace Sidecar] Could not read launcher state:', error);
       launcherState = { codexRunning: false, claudeRunning: false };
@@ -283,7 +276,7 @@
 
     <button
       class="launcher-btn"
-      class:running={launcherRunning('codex')}
+      class:running={isLauncherRunning('codex', launcherState)}
       disabled={!launcherEnabled('codex')}
       title={launcherTitle('codex', 'Codex')}
       aria-label={launcherTitle('codex', 'Codex')}
@@ -294,7 +287,7 @@
 
     <button
       class="launcher-btn"
-      class:running={launcherRunning('claude')}
+      class:running={isLauncherRunning('claude', launcherState)}
       disabled={!launcherEnabled('claude')}
       title={launcherTitle('claude', 'Claude')}
       aria-label={launcherTitle('claude', 'Claude')}
@@ -454,20 +447,27 @@
   }
 
   .launcher-btn.running {
-    background: rgba(42, 119, 183, 0.2);
-    box-shadow: inset 0 0 0 1px rgba(112, 192, 240, 0.27);
+    background: rgba(42, 148, 226, 0.5);
+    box-shadow:
+      0 0 12px rgba(74, 191, 255, 0.76),
+      inset 0 0 0 1px rgba(189, 233, 255, 0.82);
+  }
+
+  .launcher-btn.running .launcher-icon {
+    transform: scale(1.08);
   }
 
   .launcher-btn.running::after {
     content: '';
     position: absolute;
-    right: 4px;
-    bottom: 4px;
-    width: 4px;
-    height: 4px;
+    right: 2px;
+    bottom: 2px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
-    background: #86d2ff;
-    box-shadow: 0 0 6px rgba(134, 210, 255, 0.95);
+    border: 1px solid #e6f8ff;
+    background: #42beff;
+    box-shadow: 0 0 8px rgba(94, 205, 255, 1);
   }
 
   .launcher-btn:disabled {

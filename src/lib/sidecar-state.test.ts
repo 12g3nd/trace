@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   cycleSidecarBay,
+  isLauncherRunning,
   loadSidecarBay,
   saveSidecarBay,
   SIDECAR_BAY_STORAGE_KEY,
 } from './sidecar-state';
 
 describe('Sidecar bay state', () => {
+  it('recognizes the open Codex and Claude launcher states', () => {
+    expect(isLauncherRunning('codex', { codexRunning: true, claudeRunning: false })).toBe(true);
+    expect(isLauncherRunning('claude', { codexRunning: false, claudeRunning: true })).toBe(true);
+    expect(isLauncherRunning('localsend', { codexRunning: true, claudeRunning: true })).toBe(false);
+  });
+
   it('cycles forward and backward through all three bays', () => {
     expect(cycleSidecarBay('trace', 1)).toBe('media');
     expect(cycleSidecarBay('media', 1)).toBe('load');

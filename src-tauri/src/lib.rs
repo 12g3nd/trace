@@ -64,8 +64,11 @@ fn show_trace(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn launch_app(app: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.launchers.launch(&app)
+async fn launch_app(app: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let launchers = Arc::clone(&state.launchers);
+    tauri::async_runtime::spawn_blocking(move || launchers.launch(&app))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

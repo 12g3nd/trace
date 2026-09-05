@@ -311,7 +311,7 @@ fn process_ids_for_executable(executable: &str) -> Result<Vec<u32>, String> {
 }
 
 #[cfg(windows)]
-fn activate_app_user_model_id(source: &str) -> Result<(), String> {
+pub(crate) fn activate_app_user_model_id(source: &str) -> Result<(), String> {
     let source_wide: Vec<u16> = source.encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         CoInitializeEx(None, COINIT_APARTMENTTHREADED)
