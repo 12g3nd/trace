@@ -48,12 +48,14 @@ const CODEX_APP_ID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
 const CLAUDE_APP_ID: &str = "Claude_pzs8sxrjxfjjc!Claude";
 const CODEX_PROCESS_NAME: &str = "chatgpt.exe";
 const CLAUDE_PROCESS_NAME: &str = "claude.exe";
+const LOCALSEND_PROCESS_NAME: &str = "localsend_app.exe";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LauncherState {
+    pub localsend_running: bool,
     pub codex_running: bool,
     pub claude_running: bool,
 }
@@ -90,6 +92,7 @@ impl LauncherRegistry {
         if let Some(executable) = match app {
             "codex" => Some(CODEX_PROCESS_NAME),
             "claude" => Some(CLAUDE_PROCESS_NAME),
+            "localsend" => Some(LOCALSEND_PROCESS_NAME),
             _ => None,
         } {
             if crate::media::focus_running_executable(executable).is_ok() {
@@ -117,9 +120,7 @@ impl LauncherRegistry {
     }
 
     pub fn state(&self) -> LauncherState {
-        let process_names = running_process_names();
-        suppress_taskbar_buttons(&process_names);
-        launcher_state_from_process_names(process_names.iter().map(String::as_str))
+        launcher_window_state()
     }
 }
 
@@ -333,6 +334,7 @@ where
     S: AsRef<str>,
 {
     let mut state = LauncherState {
+        localsend_running: false,
         codex_running: false,
         claude_running: false,
     };
@@ -341,100 +343,76 @@ where
         let process_name = process_name.as_ref();
         state.codex_running |= process_name.eq_ignore_ascii_case(CODEX_PROCESS_NAME);
         state.claude_running |= process_name.eq_ignore_ascii_case(CLAUDE_PROCESS_NAME);
+        state.localsend_running |= process_name.eq_ignore_ascii_case(LOCALSEND_PROCESS_NAME);
     }
 
     state
 }
 
 #[cfg(windows)]
-fn running_process_names() -> Vec<String> {
+fn launcher_window_state() -> LauncherState {
+    let processes = tracked_processes();
     unsafe {
-        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
-            return Vec::new();
+        let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let taskbar = if initialized {
+            CoCreateInstance::<_, ITaskbarList>(&TaskbarList, None, CLSCTX_INPROC_SERVER)
+                .and_then(|taskbar| {
+                    taskbar.HrInit()?;
+                    Ok(taskbar)
+                })
+                .ok()
+        } else {
+            None
         };
-        let mut entry = PROCESSENTRY32W {
-            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-            ..Default::default()
+        let mut context = TaskbarContext {
+            processes: &processes,
+            taskbar: taskbar.as_ref(),
+            window_process_ids: Vec::new(),
         };
-        let mut process_names = Vec::new();
-
-        if Process32FirstW(snapshot, &mut entry).is_ok() {
-            loop {
-                let length = entry
-                    .szExeFile
-                    .iter()
-                    .position(|character| *character == 0)
-                    .unwrap_or(entry.szExeFile.len());
-                process_names.push(String::from_utf16_lossy(&entry.szExeFile[..length]));
-
-                if Process32NextW(snapshot, &mut entry).is_err() {
-                    break;
-                }
-            }
+        let _ = EnumWindows(
+            Some(inspect_launcher_window),
+            LPARAM(&mut context as *mut TaskbarContext<'_> as isize),
+        );
+        let state = launcher_state_from_windows(&processes, &context.window_process_ids);
+        drop(context);
+        drop(taskbar);
+        if initialized {
+            CoUninitialize();
         }
-
-        let _ = CloseHandle(snapshot);
-        process_names
+        state
     }
 }
 
 #[cfg(not(windows))]
-fn running_process_names() -> Vec<String> {
-    Vec::new()
+fn launcher_window_state() -> LauncherState {
+    launcher_state_from_windows(&HashMap::new(), &[])
 }
 
-#[cfg(windows)]
-fn suppress_taskbar_buttons(process_names: &[String]) {
-    let tracked_processes = tracked_process_ids(process_names);
-    if tracked_processes.is_empty() {
-        return;
-    }
-
-    unsafe {
-        if CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_err() {
-            return;
-        }
-        let result = (|| -> windows::core::Result<()> {
-            let taskbar: ITaskbarList = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)?;
-            taskbar.HrInit()?;
-            let context = TaskbarContext {
-                process_ids: &tracked_processes,
-                taskbar: &taskbar,
-            };
-            let _ = EnumWindows(
-                Some(suppress_taskbar_button_for_tracked_window),
-                LPARAM(&context as *const TaskbarContext<'_> as isize),
-            );
-            Ok(())
-        })();
-        if let Err(error) = result {
-            eprintln!("[Trace Sidecar] Could not remove launcher taskbar buttons: {error}");
-        }
-        CoUninitialize();
-    }
+fn launcher_state_from_windows(
+    processes: &HashMap<u32, String>,
+    window_process_ids: &[u32],
+) -> LauncherState {
+    launcher_state_from_process_names(window_process_ids.iter().filter_map(|id| processes.get(id)))
 }
 
 #[cfg(windows)]
 struct TaskbarContext<'a> {
-    process_ids: &'a [u32],
-    taskbar: &'a ITaskbarList,
+    processes: &'a HashMap<u32, String>,
+    taskbar: Option<&'a ITaskbarList>,
+    window_process_ids: Vec<u32>,
 }
 
-#[cfg(not(windows))]
-fn suppress_taskbar_buttons(_process_names: &[String]) {}
-
 #[cfg(windows)]
-fn tracked_process_ids(_process_names: &[String]) -> Vec<u32> {
+fn tracked_processes() -> HashMap<u32, String> {
     unsafe {
         let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
-            return Vec::new();
+            return HashMap::new();
         };
         let mut entry = PROCESSENTRY32W {
             dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
             ..Default::default()
         };
-        let mut process_ids = Vec::new();
-
+        let mut processes = HashMap::new();
         if Process32FirstW(snapshot, &mut entry).is_ok() {
             loop {
                 let length = entry
@@ -443,52 +421,59 @@ fn tracked_process_ids(_process_names: &[String]) -> Vec<u32> {
                     .position(|character| *character == 0)
                     .unwrap_or(entry.szExeFile.len());
                 let name = String::from_utf16_lossy(&entry.szExeFile[..length]);
-                if name.eq_ignore_ascii_case(CODEX_PROCESS_NAME)
-                    || name.eq_ignore_ascii_case(CLAUDE_PROCESS_NAME)
+                if [
+                    CODEX_PROCESS_NAME,
+                    CLAUDE_PROCESS_NAME,
+                    LOCALSEND_PROCESS_NAME,
+                ]
+                .iter()
+                .any(|tracked| name.eq_ignore_ascii_case(tracked))
                 {
-                    process_ids.push(entry.th32ProcessID);
+                    processes.insert(entry.th32ProcessID, name);
                 }
-
                 if Process32NextW(snapshot, &mut entry).is_err() {
                     break;
                 }
             }
         }
-
         let _ = CloseHandle(snapshot);
-        process_ids
+        processes
     }
 }
 
 #[cfg(windows)]
-unsafe extern "system" fn suppress_taskbar_button_for_tracked_window(
-    window: HWND,
-    data: LPARAM,
-) -> BOOL {
-    let context = &*(data.0 as *const TaskbarContext<'_>);
+unsafe extern "system" fn inspect_launcher_window(window: HWND, data: LPARAM) -> BOOL {
+    let context = &mut *(data.0 as *mut TaskbarContext<'_>);
     let mut process_id = 0;
     GetWindowThreadProcessId(window, Some(&mut process_id));
-    if !context.process_ids.contains(&process_id)
+    // IsWindowVisible includes minimized windows, but excludes close-to-tray windows.
+    if !context.processes.contains_key(&process_id)
         || !IsWindowVisible(window).as_bool()
         || GetWindowTextLengthW(window) == 0
     {
         return BOOL(1);
     }
+    context.window_process_ids.push(process_id);
 
     let current = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
-    // Repair the main-window tool style applied by older Trace versions.
-    // DeleteTab removes the actual shell entry without hiding or reframing apps.
-    if current & WS_EX_TOOLWINDOW.0 != 0 {
+    // Repair styles applied to Claude/Codex by older Trace versions only.
+    if context
+        .processes
+        .get(&process_id)
+        .is_some_and(|name| !name.eq_ignore_ascii_case(LOCALSEND_PROCESS_NAME))
+        && current & WS_EX_TOOLWINDOW.0 != 0
+    {
         SetWindowLongPtrW(
             window,
             GWL_EXSTYLE,
             ((current & !WS_EX_TOOLWINDOW.0) | WS_EX_APPWINDOW.0) as isize,
         );
     }
-    if let Err(error) = context.taskbar.DeleteTab(window) {
-        eprintln!("[Trace Sidecar] Could not remove taskbar entry: {error}");
+    if let Some(taskbar) = context.taskbar {
+        if let Err(error) = taskbar.DeleteTab(window) {
+            eprintln!("[Trace Sidecar] Could not remove taskbar entry: {error}");
+        }
     }
-
     BOOL(1)
 }
 
@@ -603,6 +588,21 @@ fn media_popover_position(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_open_windows_light_launchers_even_if_background_processes_remain() {
+        let processes = std::collections::HashMap::from([
+            (1, "ChatGPT.exe".to_string()),
+            (2, "claude.exe".to_string()),
+            (3, "localsend_app.exe".to_string()),
+        ]);
+        let state = super::launcher_state_from_windows(&processes, &[1, 2, 3]);
+        assert!(state.codex_running && state.claude_running && state.localsend_running);
+        let state = super::launcher_state_from_windows(&processes, &[3]);
+        assert!(!state.codex_running && !state.claude_running && state.localsend_running);
+        let state = super::launcher_state_from_windows(&processes, &[]);
+        assert!(!state.codex_running && !state.claude_running && !state.localsend_running);
+    }
+
     use super::{
         anchored_position, launcher_state_from_process_names, media_popover_position,
         BOTTOM_MARGIN_LOGICAL, LEFT_MARGIN_LOGICAL, MEDIA_POPOVER_GAP_LOGICAL,

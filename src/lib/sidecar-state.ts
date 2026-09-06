@@ -4,6 +4,7 @@ export const SIDECAR_LAUNCHERS = ['localsend', 'codex', 'claude'] as const;
 export type SidecarLauncher = (typeof SIDECAR_LAUNCHERS)[number];
 
 export interface SidecarLauncherState {
+  localsendRunning: boolean;
   codexRunning: boolean;
   claudeRunning: boolean;
 }
@@ -29,7 +30,8 @@ export function saveSidecarBay(storage: BayStorage, bay: SidecarBay): void {
 
 export function isLauncherRunning(launcher: SidecarLauncher, state: SidecarLauncherState): boolean {
   return (launcher === 'codex' && state.codexRunning)
-    || (launcher === 'claude' && state.claudeRunning);
+    || (launcher === 'claude' && state.claudeRunning)
+    || (launcher === 'localsend' && state.localsendRunning);
 }
 
 export function cycleSidecarBay(current: SidecarBay, direction: -1 | 1): SidecarBay {

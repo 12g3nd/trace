@@ -9,9 +9,11 @@ import {
 
 describe('Sidecar bay state', () => {
   it('recognizes the open Codex and Claude launcher states', () => {
-    expect(isLauncherRunning('codex', { codexRunning: true, claudeRunning: false })).toBe(true);
-    expect(isLauncherRunning('claude', { codexRunning: false, claudeRunning: true })).toBe(true);
-    expect(isLauncherRunning('localsend', { codexRunning: true, claudeRunning: true })).toBe(false);
+    const state = { codexRunning: true, claudeRunning: true, localsendRunning: false };
+    expect(isLauncherRunning('codex', state)).toBe(true);
+    expect(isLauncherRunning('claude', state)).toBe(true);
+    expect(isLauncherRunning('localsend', state)).toBe(false);
+    expect(isLauncherRunning('localsend', { ...state, localsendRunning: true })).toBe(true);
   });
 
   it('cycles forward and backward through all three bays', () => {

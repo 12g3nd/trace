@@ -35,7 +35,7 @@
   let unavailableLaunchers: Launcher[] = [];
   let launching: Launcher[] = [];
   let launcherRefreshInFlight = false;
-  let launcherState: SidecarLauncherState = { codexRunning: false, claudeRunning: false };
+  let launcherState: SidecarLauncherState = { codexRunning: false, claudeRunning: false, localsendRunning: false };
   let media = EMPTY_MEDIA;
   let load: LoadState | null = null;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -92,7 +92,7 @@
       tick += 1;
       if (bay === 'media') void refreshMedia();
       if (bay === 'load' && tick % 2 === 0) void refreshLoad();
-      if (tick % 2 === 0) void refreshLauncherState();
+      void refreshLauncherState();
       if (tick % 15 === 0) void refreshAnchor();
     }, 1000);
 
@@ -187,7 +187,7 @@
       launcherState = await invoke<SidecarLauncherState>('get_launcher_state');
     } catch (error) {
       console.warn('[Trace Sidecar] Could not read launcher state:', error);
-      launcherState = { codexRunning: false, claudeRunning: false };
+      launcherState = { codexRunning: false, claudeRunning: false, localsendRunning: false };
     } finally {
       launcherRefreshInFlight = false;
     }
@@ -275,8 +275,9 @@
     <button
       class="launcher-btn"
       disabled={!launcherEnabled('localsend')}
+      class:running={isLauncherRunning('localsend', launcherState)}
       title={launcherTitle('localsend', 'LocalSend')}
-      aria-label="LocalSend"
+      aria-label={launcherTitle('localsend', 'LocalSend')}
       on:click={() => openLauncher('localsend')}
     >
       <img class="launcher-icon localsend-icon" src={localSendIcon} alt="" />
