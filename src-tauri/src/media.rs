@@ -223,7 +223,7 @@ fn activate_source(_source: &str) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn focus_running_executable(executable: &str) -> Result<(), String> {
+pub(crate) fn focus_running_executable(executable: &str) -> Result<(), String> {
     let process_ids = process_ids_for_executable(executable)?;
     if process_ids.is_empty() {
         return Err(format!(
@@ -246,7 +246,9 @@ fn focus_running_executable(executable: &str) -> Result<(), String> {
         .ok_or_else(|| format!("no running {executable} process has a visible window"))?;
 
     unsafe {
-        let _ = ShowWindowAsync(window, SW_RESTORE);
+        if windows::Win32::UI::WindowsAndMessaging::IsIconic(window).as_bool() {
+            let _ = ShowWindowAsync(window, SW_RESTORE);
+        }
         if !SetForegroundWindow(window).as_bool() {
             return Err(format!("Windows declined to focus {executable}"));
         }

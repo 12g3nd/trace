@@ -72,8 +72,13 @@ async fn launch_app(app: String, state: tauri::State<'_, AppState>) -> Result<()
 }
 
 #[tauri::command]
-fn get_launcher_state(state: tauri::State<'_, AppState>) -> sidecar::LauncherState {
-    state.launchers.state()
+async fn get_launcher_state(
+    state: tauri::State<'_, AppState>,
+) -> Result<sidecar::LauncherState, String> {
+    let launchers = Arc::clone(&state.launchers);
+    tauri::async_runtime::spawn_blocking(move || launchers.state())
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

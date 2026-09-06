@@ -33,6 +33,8 @@
 
   let bay: SidecarBay = 'trace';
   let unavailableLaunchers: Launcher[] = [];
+  let launching: Launcher[] = [];
+  let launcherRefreshInFlight = false;
   let launcherState: SidecarLauncherState = { codexRunning: false, claudeRunning: false };
   let media = EMPTY_MEDIA;
   let load: LoadState | null = null;
@@ -179,22 +181,28 @@
   }
 
   async function refreshLauncherState() {
+    if (launcherRefreshInFlight || disposed) return;
+    launcherRefreshInFlight = true;
     try {
       launcherState = await invoke<SidecarLauncherState>('get_launcher_state');
     } catch (error) {
       console.warn('[Trace Sidecar] Could not read launcher state:', error);
       launcherState = { codexRunning: false, claudeRunning: false };
+    } finally {
+      launcherRefreshInFlight = false;
     }
   }
 
   async function openLauncher(launcher: Launcher) {
-    if (!launcherEnabled(launcher)) return;
+    if (!launcherEnabled(launcher) || launching.includes(launcher)) return;
+    launching = [...launching, launcher];
     try {
       await invoke('launch_app', { app: launcher });
       setTimeout(refreshLauncherState, 500);
     } catch (error) {
       console.warn(`[Trace Sidecar] Could not launch ${launcher}:`, error);
-      unavailableLaunchers = [...new Set([...unavailableLaunchers, launcher])];
+    } finally {
+      launching = launching.filter((pending) => pending !== launcher);
     }
   }
 

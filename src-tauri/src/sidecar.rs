@@ -15,14 +15,22 @@ use windows::core::BOOL;
 #[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 #[cfg(windows)]
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED,
+};
+#[cfg(windows)]
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 #[cfg(windows)]
+use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
+#[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, SetWindowLongPtrW, SetWindowPos,
-    GWL_EXSTYLE, HWND_NOTOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    EnumWindows, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowThreadProcessId,
+    IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_NOTOPMOST,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 pub const SIDECAR_LABEL: &str = "sidecar";
@@ -77,6 +85,17 @@ impl LauncherRegistry {
     }
 
     pub fn launch(&self, app: &str) -> Result<(), String> {
+        // Switching an existing window avoids the package activation round trip.
+        #[cfg(windows)]
+        if let Some(executable) = match app {
+            "codex" => Some(CODEX_PROCESS_NAME),
+            "claude" => Some(CLAUDE_PROCESS_NAME),
+            _ => None,
+        } {
+            if crate::media::focus_running_executable(executable).is_ok() {
+                return Ok(());
+            }
+        }
         let target = self
             .targets()
             .get(app)
@@ -372,11 +391,33 @@ fn suppress_taskbar_buttons(process_names: &[String]) {
     }
 
     unsafe {
-        let _ = EnumWindows(
-            Some(suppress_taskbar_button_for_tracked_window),
-            LPARAM(&tracked_processes as *const Vec<u32> as isize),
-        );
+        if CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_err() {
+            return;
+        }
+        let result = (|| -> windows::core::Result<()> {
+            let taskbar: ITaskbarList = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)?;
+            taskbar.HrInit()?;
+            let context = TaskbarContext {
+                process_ids: &tracked_processes,
+                taskbar: &taskbar,
+            };
+            let _ = EnumWindows(
+                Some(suppress_taskbar_button_for_tracked_window),
+                LPARAM(&context as *const TaskbarContext<'_> as isize),
+            );
+            Ok(())
+        })();
+        if let Err(error) = result {
+            eprintln!("[Trace Sidecar] Could not remove launcher taskbar buttons: {error}");
+        }
+        CoUninitialize();
     }
+}
+
+#[cfg(windows)]
+struct TaskbarContext<'a> {
+    process_ids: &'a [u32],
+    taskbar: &'a ITaskbarList,
 }
 
 #[cfg(not(windows))]
@@ -424,26 +465,28 @@ unsafe extern "system" fn suppress_taskbar_button_for_tracked_window(
     window: HWND,
     data: LPARAM,
 ) -> BOOL {
-    let tracked_processes = &*(data.0 as *const Vec<u32>);
+    let context = &*(data.0 as *const TaskbarContext<'_>);
     let mut process_id = 0;
     GetWindowThreadProcessId(window, Some(&mut process_id));
-    if !tracked_processes.contains(&process_id) {
+    if !context.process_ids.contains(&process_id)
+        || !IsWindowVisible(window).as_bool()
+        || GetWindowTextLengthW(window) == 0
+    {
         return BOOL(1);
     }
 
     let current = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
-    let hidden_from_taskbar = tool_window_ex_style(current);
-    if hidden_from_taskbar != current {
-        SetWindowLongPtrW(window, GWL_EXSTYLE, hidden_from_taskbar as isize);
-        let _ = SetWindowPos(
+    // Repair the main-window tool style applied by older Trace versions.
+    // DeleteTab removes the actual shell entry without hiding or reframing apps.
+    if current & WS_EX_TOOLWINDOW.0 != 0 {
+        SetWindowLongPtrW(
             window,
-            None,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+            GWL_EXSTYLE,
+            ((current & !WS_EX_TOOLWINDOW.0) | WS_EX_APPWINDOW.0) as isize,
         );
+    }
+    if let Err(error) = context.taskbar.DeleteTab(window) {
+        eprintln!("[Trace Sidecar] Could not remove taskbar entry: {error}");
     }
 
     BOOL(1)
