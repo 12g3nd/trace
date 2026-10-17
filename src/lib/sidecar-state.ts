@@ -1,12 +1,13 @@
-export const SIDECAR_BAYS = ['trace', 'media', 'load'] as const;
+export const SIDECAR_BAYS = ['trace', 'media', 'load', 'localsend'] as const;
 export type SidecarBay = (typeof SIDECAR_BAYS)[number];
-export const SIDECAR_LAUNCHERS = ['localsend', 'codex', 'claude'] as const;
+export const SIDECAR_LAUNCHERS = ['localsend', 'codex', 'claude', 'gemini'] as const;
 export type SidecarLauncher = (typeof SIDECAR_LAUNCHERS)[number];
 
 export interface SidecarLauncherState {
   localsendRunning: boolean;
   codexRunning: boolean;
   claudeRunning: boolean;
+  geminiRunning: boolean;
 }
 
 export const SIDECAR_BAY_STORAGE_KEY = 'trace.sidecar.bay';
@@ -31,6 +32,7 @@ export function saveSidecarBay(storage: BayStorage, bay: SidecarBay): void {
 export function isLauncherRunning(launcher: SidecarLauncher, state: SidecarLauncherState): boolean {
   return (launcher === 'codex' && state.codexRunning)
     || (launcher === 'claude' && state.claudeRunning)
+    || (launcher === 'gemini' && state.geminiRunning)
     || (launcher === 'localsend' && state.localsendRunning);
 }
 

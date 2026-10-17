@@ -14,16 +14,17 @@ Examples:
 
 ## Orbit Sidecar
 
-Trace also runs a compact **Orbit Sidecar** in the bottom-left taskbar plane of the primary monitor. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry. It follows the normal taskbar z-order, so it does not overlay full-screen apps. The full Trace window is a single-instance, always-on-top utility palette by default, so summoning it remains immediate and does not add another taskbar or Alt+Tab presence; its pin control can temporarily release or restore topmost behavior.
+Trace also runs a compact **Orbit Sidecar** in the bottom-left taskbar plane of the primary monitor. It remains available when the main task window is hidden and when Trace starts through autostart with `--minimized`, without adding a taskbar, Alt+Tab, or system-tray entry. A native layer watcher keeps it above normal and maximized windows alongside the taskbar, and lowers it when the taskbar yields to full-screen apps. The full Trace window is a single-instance, always-on-top utility palette by default, so summoning it remains immediate and does not add another taskbar or Alt+Tab presence; its pin control can temporarily release or restore topmost behavior.
 
 The Sidecar provides:
 
-- Local launch/focus controls for **LocalSend**, **Codex**, and **Claude** using their installed Windows app identities. Open Codex and Claude windows are removed from the Windows taskbar; their Sidecar buttons receive a blue active marker instead.
+- Persistent launch/focus controls for **Codex**, **Claude**, and **Gemini**, in that order, using their installed Windows app identities or executable paths. Open launcher apps are removed from the Windows taskbar; their Sidecar controls receive a blue active marker instead.
 - A quiet **Trace** doorway that summons the main window and focuses its normal capture workflow.
 - A switchable **Media** bay for the current Windows system media session, with album art, title, play/pause, and next when supported. Hovering it intentionally opens a larger, non-activating controller with artist metadata and previous/play-pause/next controls; clicking either player's non-control surface focuses the source app.
 - A minimal **Load** bay showing native Windows memory use and CPU load; click it to open Task Manager.
+- A **LocalSend** bay with its logo and name; click it to launch or focus LocalSend.
 
-The selected Trace/Media/Load bay persists locally. Use the quiet chevrons or the mouse wheel over the bay to cycle it. Media is read through one shared Windows GSMTC refresh path, while Load uses lightweight native system APIs and only polls while visible. The Sidecar and media popover intentionally never query or display TODO contents, task metadata, or task counts.
+The selected Trace/Media/Load/LocalSend bay persists locally. Use the quiet chevrons or the mouse wheel over the bay to cycle it. Media is read through one shared Windows GSMTC refresh path, while Load uses lightweight native system APIs and only polls while visible. The Sidecar and media popover intentionally never query or display TODO contents, task metadata, or task counts.
 
 Right-click Sidecar for **Open Trace**, **Re-anchor Sidecar**, **Start with Windows**, and **Quit Trace**. Trace has no tray icon and does not modify or reserve the Windows taskbar.
 

@@ -315,6 +315,8 @@ pub fn run() {
             if let Err(error) = sidecar::show(app.handle()) {
                 eprintln!("[Trace] Failed to show Orbit Sidecar: {error}");
             }
+            #[cfg(windows)]
+            sidecar::watch_taskbar_layer(app.handle().clone())?;
 
             // Register exactly one global summon shortcut.
             // Primary: Win+Shift+T. If that fails, fall back to Alt+Shift+T.

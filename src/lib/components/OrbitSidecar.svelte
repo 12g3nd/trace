@@ -4,6 +4,7 @@
   import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
   import chatgptIcon from '../../assets/orbit/chatgpt.svg';
   import claudeIcon from '../../assets/orbit/claude.svg';
+  import geminiIcon from '../../assets/orbit/gemini.png';
   import localSendIcon from '../../assets/orbit/localsend.svg';
   import { MediaPopoverIntent } from '$lib/media-popover-intent';
   import {
@@ -35,7 +36,7 @@
   let unavailableLaunchers: Launcher[] = [];
   let launching: Launcher[] = [];
   let launcherRefreshInFlight = false;
-  let launcherState: SidecarLauncherState = { codexRunning: false, claudeRunning: false, localsendRunning: false };
+  let launcherState: SidecarLauncherState = { codexRunning: false, claudeRunning: false, geminiRunning: false, localsendRunning: false };
   let media = EMPTY_MEDIA;
   let load: LoadState | null = null;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
@@ -187,7 +188,7 @@
       launcherState = await invoke<SidecarLauncherState>('get_launcher_state');
     } catch (error) {
       console.warn('[Trace Sidecar] Could not read launcher state:', error);
-      launcherState = { codexRunning: false, claudeRunning: false, localsendRunning: false };
+      launcherState = { codexRunning: false, claudeRunning: false, geminiRunning: false, localsendRunning: false };
     } finally {
       launcherRefreshInFlight = false;
     }
@@ -274,17 +275,6 @@
   <nav class="launcher-group" aria-label="Application launchers">
     <button
       class="launcher-btn"
-      disabled={!launcherEnabled('localsend')}
-      class:running={isLauncherRunning('localsend', launcherState)}
-      title={launcherTitle('localsend', 'LocalSend')}
-      aria-label={launcherTitle('localsend', 'LocalSend')}
-      on:click={() => openLauncher('localsend')}
-    >
-      <img class="launcher-icon localsend-icon" src={localSendIcon} alt="" />
-    </button>
-
-    <button
-      class="launcher-btn"
       class:running={isLauncherRunning('codex', launcherState)}
       disabled={!launcherEnabled('codex')}
       title={launcherTitle('codex', 'Codex')}
@@ -303,6 +293,17 @@
       on:click={() => openLauncher('claude')}
     >
       <img class="launcher-icon claude-icon" src={claudeIcon} alt="" />
+    </button>
+
+    <button
+      class="launcher-btn"
+      class:running={isLauncherRunning('gemini', launcherState)}
+      disabled={!launcherEnabled('gemini')}
+      title={launcherTitle('gemini', 'Gemini')}
+      aria-label={launcherTitle('gemini', 'Gemini')}
+      on:click={() => openLauncher('gemini')}
+    >
+      <img class="launcher-icon" src={geminiIcon} alt="" />
     </button>
   </nav>
 
@@ -384,7 +385,7 @@
                 </svg>
               </button>
             </div>
-          {:else}
+          {:else if bay === 'load'}
             <button class="load-bay" title={loadTooltip} aria-label={`${loadTooltip}; open Task Manager`} on:click={openTaskManager}>
               {#if load}
                 <span><strong>MEM</strong> {load.memoryUsedGib.toFixed(1)}/{load.memoryTotalGib.toFixed(1)}G</span>
@@ -393,6 +394,18 @@
                 <span class="bay-label">LOAD</span>
                 <span class="load-pending">INITIALIZING</span>
               {/if}
+            </button>
+          {:else if bay === 'localsend'}
+            <button
+              class="localsend-door"
+              class:running={isLauncherRunning('localsend', launcherState)}
+              disabled={!launcherEnabled('localsend')}
+              title={launcherTitle('localsend', 'LocalSend')}
+              aria-label={launcherTitle('localsend', 'LocalSend')}
+              on:click={() => openLauncher('localsend')}
+            >
+              <img class="launcher-icon" src={localSendIcon} alt="" />
+              <span class="localsend-label">LocalSend</span>
             </button>
           {/if}
         </div>
@@ -455,7 +468,8 @@
     background: rgba(232, 239, 245, 0.08);
   }
 
-  .launcher-btn.running {
+  .launcher-btn.running,
+  .localsend-door.running {
     background: rgba(42, 148, 226, 0.22);
     box-shadow: 0 0 8px rgba(74, 191, 255, 0.34);
   }
@@ -464,7 +478,8 @@
     transform: scale(1.08);
   }
 
-  .launcher-btn:disabled {
+  .launcher-btn:disabled,
+  .localsend-door:disabled {
     opacity: 0.3;
   }
 
@@ -558,6 +573,7 @@
   }
 
   .trace-door,
+  .localsend-door,
   .load-bay {
     width: 100%;
     height: 38px;
@@ -573,6 +589,8 @@
 
   .trace-door:hover,
   .trace-door:focus-visible,
+  .localsend-door:hover:not(:disabled),
+  .localsend-door:focus-visible,
   .load-bay:hover,
   .load-bay:focus-visible {
     color: var(--on-text);
@@ -584,6 +602,12 @@
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.11em;
+  }
+
+  .localsend-label {
+    font-family: var(--on-font-interface);
+    font-size: 11px;
+    font-weight: 500;
   }
 
   .open-icon {
@@ -753,6 +777,7 @@
     .launcher-btn,
     .nav-btn,
     .trace-door,
+    .localsend-door,
     .load-bay,
     .media-btn {
       transition: none;

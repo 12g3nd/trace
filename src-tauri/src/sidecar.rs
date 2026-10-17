@@ -11,7 +11,7 @@ use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 #[cfg(windows)]
-use windows::core::BOOL;
+use windows::core::{w, BOOL};
 #[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 #[cfg(windows)]
@@ -27,14 +27,14 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowThreadProcessId,
-    IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_NOTOPMOST,
+    EnumWindows, FindWindowW, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowThreadProcessId,
+    IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_BOTTOM, HWND_TOPMOST,
     SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 
 pub const SIDECAR_LABEL: &str = "sidecar";
-pub const SIDECAR_WIDTH_LOGICAL: u32 = 288;
+pub const SIDECAR_WIDTH_LOGICAL: u32 = 317;
 pub const SIDECAR_HEIGHT_LOGICAL: u32 = 48;
 pub const LEFT_MARGIN_LOGICAL: i32 = 5;
 pub const BOTTOM_MARGIN_LOGICAL: i32 = 0;
@@ -48,6 +48,7 @@ const CODEX_APP_ID: &str = "OpenAI.Codex_2p2nqsd0c76g0!App";
 const CLAUDE_APP_ID: &str = "Claude_pzs8sxrjxfjjc!Claude";
 const CODEX_PROCESS_NAME: &str = "chatgpt.exe";
 const CLAUDE_PROCESS_NAME: &str = "claude.exe";
+const GEMINI_PROCESS_NAME: &str = "gemini.exe";
 const LOCALSEND_PROCESS_NAME: &str = "localsend_app.exe";
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -58,6 +59,7 @@ pub struct LauncherState {
     pub localsend_running: bool,
     pub codex_running: bool,
     pub claude_running: bool,
+    pub gemini_running: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +94,7 @@ impl LauncherRegistry {
         if let Some(executable) = match app {
             "codex" => Some(CODEX_PROCESS_NAME),
             "claude" => Some(CLAUDE_PROCESS_NAME),
+            "gemini" => Some(GEMINI_PROCESS_NAME),
             "localsend" => Some(LOCALSEND_PROCESS_NAME),
             _ => None,
         } {
@@ -133,6 +136,15 @@ fn discover_launchers() -> HashMap<String, LaunchTarget> {
 
     targets.insert("codex".into(), LaunchTarget::AppId(CODEX_APP_ID.into()));
     targets.insert("claude".into(), LaunchTarget::AppId(CLAUDE_APP_ID.into()));
+    if let Some(root) = env::var_os("LOCALAPPDATA") {
+        let path = Path::new(&root)
+            .join("Google")
+            .join("Gemini")
+            .join("Gemini.exe");
+        if path.is_file() {
+            targets.insert("gemini".into(), LaunchTarget::Executable(path));
+        }
+    }
 
     targets
 }
@@ -306,9 +318,27 @@ fn ensure_taskbar_z_order(window: &tauri::WebviewWindow) -> Result<(), String> {
     let hwnd = window.hwnd().map_err(|error| error.to_string())?;
 
     unsafe {
+        // Explorer drops its topmost flag for full-screen apps. Follow that
+        // layer instead of unconditionally demoting Sidecar behind normal apps.
+        // Default to topmost while Explorer is restarting.
+        let topmost = FindWindowW(w!("Shell_TrayWnd"), None)
+            .map(|taskbar| GetWindowLongPtrW(taskbar, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0)
+            .unwrap_or(true);
+        sync_taskbar_layer(hwnd, topmost)
+    }
+}
+
+#[cfg(windows)]
+fn sync_taskbar_layer(hwnd: HWND, topmost: bool) -> Result<(), String> {
+    unsafe {
+        let current = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0;
+        if current == topmost {
+            return Ok(());
+        }
         SetWindowPos(
             hwnd,
-            Some(HWND_NOTOPMOST),
+            // Demoting to the bottom also keeps us behind a full-screen app.
+            Some(if topmost { HWND_TOPMOST } else { HWND_BOTTOM }),
             0,
             0,
             0,
@@ -324,7 +354,39 @@ fn ensure_taskbar_z_order(window: &tauri::WebviewWindow) -> Result<(), String> {
 #[cfg(not(windows))]
 fn ensure_taskbar_z_order(window: &tauri::WebviewWindow) -> Result<(), String> {
     window
-        .set_always_on_top(false)
+        .set_always_on_top(true)
+        .map_err(|error| error.to_string())
+}
+
+// Native refresh is independent of WebView background timer throttling. Only
+// layer transitions call SetWindowPos, so ordinary focus changes cannot cover
+// Sidecar and repeated refreshes do not raise it or steal keyboard focus.
+#[cfg(windows)]
+pub fn watch_taskbar_layer(app: AppHandle) -> Result<(), String> {
+    std::thread::Builder::new()
+        .name("sidecar-taskbar-layer".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if app.get_webview_window(SIDECAR_LABEL).is_none() {
+                break;
+            }
+            let handle = app.clone();
+            if app
+                .run_on_main_thread(move || {
+                    for label in [SIDECAR_LABEL, MEDIA_POPOVER_LABEL] {
+                        if let Some(window) = handle.get_webview_window(label) {
+                            if let Err(error) = ensure_taskbar_z_order(&window) {
+                                eprintln!("[Trace] Could not sync {label} taskbar layer: {error}");
+                            }
+                        }
+                    }
+                })
+                .is_err()
+            {
+                break;
+            }
+        })
+        .map(|_| ())
         .map_err(|error| error.to_string())
 }
 
@@ -337,12 +399,14 @@ where
         localsend_running: false,
         codex_running: false,
         claude_running: false,
+        gemini_running: false,
     };
 
     for process_name in process_names {
         let process_name = process_name.as_ref();
         state.codex_running |= process_name.eq_ignore_ascii_case(CODEX_PROCESS_NAME);
         state.claude_running |= process_name.eq_ignore_ascii_case(CLAUDE_PROCESS_NAME);
+        state.gemini_running |= process_name.eq_ignore_ascii_case(GEMINI_PROCESS_NAME);
         state.localsend_running |= process_name.eq_ignore_ascii_case(LOCALSEND_PROCESS_NAME);
     }
 
@@ -424,6 +488,7 @@ fn tracked_processes() -> HashMap<u32, String> {
                 if [
                     CODEX_PROCESS_NAME,
                     CLAUDE_PROCESS_NAME,
+                    GEMINI_PROCESS_NAME,
                     LOCALSEND_PROCESS_NAME,
                 ]
                 .iter()
@@ -457,11 +522,10 @@ unsafe extern "system" fn inspect_launcher_window(window: HWND, data: LPARAM) ->
 
     let current = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
     // Repair styles applied to Claude/Codex by older Trace versions only.
-    if context
-        .processes
-        .get(&process_id)
-        .is_some_and(|name| !name.eq_ignore_ascii_case(LOCALSEND_PROCESS_NAME))
-        && current & WS_EX_TOOLWINDOW.0 != 0
+    if context.processes.get(&process_id).is_some_and(|name| {
+        name.eq_ignore_ascii_case(CODEX_PROCESS_NAME)
+            || name.eq_ignore_ascii_case(CLAUDE_PROCESS_NAME)
+    }) && current & WS_EX_TOOLWINDOW.0 != 0
     {
         SetWindowLongPtrW(
             window,
@@ -594,13 +658,32 @@ mod tests {
             (1, "ChatGPT.exe".to_string()),
             (2, "claude.exe".to_string()),
             (3, "localsend_app.exe".to_string()),
+            (4, "Gemini.exe".to_string()),
         ]);
-        let state = super::launcher_state_from_windows(&processes, &[1, 2, 3]);
-        assert!(state.codex_running && state.claude_running && state.localsend_running);
+        let state = super::launcher_state_from_windows(&processes, &[1, 2, 3, 4]);
+        assert!(
+            state.codex_running
+                && state.claude_running
+                && state.localsend_running
+                && state.gemini_running
+        );
         let state = super::launcher_state_from_windows(&processes, &[3]);
         assert!(!state.codex_running && !state.claude_running && state.localsend_running);
+        assert!(!state.gemini_running);
+        let state = super::launcher_state_from_windows(&processes, &[4]);
+        assert!(
+            state.gemini_running
+                && !state.claude_running
+                && !state.codex_running
+                && !state.localsend_running
+        );
         let state = super::launcher_state_from_windows(&processes, &[]);
-        assert!(!state.codex_running && !state.claude_running && !state.localsend_running);
+        assert!(
+            !state.codex_running
+                && !state.claude_running
+                && !state.localsend_running
+                && !state.gemini_running
+        );
     }
 
     use super::{
@@ -608,6 +691,65 @@ mod tests {
         BOTTOM_MARGIN_LOGICAL, LEFT_MARGIN_LOGICAL, MEDIA_POPOVER_GAP_LOGICAL,
         MEDIA_POPOVER_HEIGHT_LOGICAL, SIDECAR_HEIGHT_LOGICAL, SIDECAR_WIDTH_LOGICAL,
     };
+
+    #[cfg(windows)]
+    #[test]
+    fn native_shell_layer_follows_taskbar_transitions_without_focus_or_repeated_raising() {
+        use windows::core::w;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, DispatchMessageW, GetForegroundWindow, GetWindow,
+            GetWindowLongPtrW, PeekMessageW, ShowWindow, GWL_EXSTYLE, GW_HWNDPREV, MSG, PM_REMOVE,
+            SW_SHOWNOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+        };
+
+        // Real HWNDs exercise the native API, including idempotent refreshes.
+        struct TestWindow(super::HWND);
+        impl Drop for TestWindow {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = DestroyWindow(self.0);
+                }
+            }
+        }
+        unsafe {
+            let window = TestWindow(
+                CreateWindowExW(
+                    WS_EX_TOOLWINDOW,
+                    w!("STATIC"),
+                    w!("Trace layer regression"),
+                    WS_POPUP,
+                    0,
+                    0,
+                    1,
+                    1,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            );
+            let foreground = GetForegroundWindow();
+            // Keep a one-pixel surface on-screen and non-activating. Windows
+            // can disregard topmost transitions for entirely off-screen windows.
+            let _ = ShowWindow(window.0, SW_SHOWNOACTIVATE);
+            for topmost in [true, true, false, false, true] {
+                super::sync_taskbar_layer(window.0, topmost).unwrap();
+                let mut message = MSG::default();
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    DispatchMessageW(&message);
+                }
+                assert_eq!(
+                    GetWindowLongPtrW(window.0, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0,
+                    topmost
+                );
+                let before = GetWindow(window.0, GW_HWNDPREV).ok();
+                super::sync_taskbar_layer(window.0, topmost).unwrap();
+                assert_eq!(GetWindow(window.0, GW_HWNDPREV).ok(), before);
+                assert_eq!(GetForegroundWindow(), foreground);
+            }
+        }
+    }
 
     #[test]
     fn reports_codex_and_claude_from_their_desktop_processes() {
