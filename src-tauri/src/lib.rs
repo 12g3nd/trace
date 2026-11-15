@@ -141,7 +141,7 @@ fn open_task_manager() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn reanchor_sidecar(app: tauri::AppHandle) -> Result<(), String> {
+async fn reanchor_sidecar(app: tauri::AppHandle) -> Result<(), String> {
     sidecar::anchor(&app)
 }
 
@@ -156,13 +156,87 @@ fn hide_media_popover(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn toggle_sidecar(app: tauri::AppHandle) -> Result<bool, String> {
+async fn toggle_sidecar(app: tauri::AppHandle) -> Result<bool, String> {
     sidecar::toggle(&app)
 }
 
 #[tauri::command]
+async fn orbit_glass(window: tauri::WebviewWindow, previous: Option<bool>) -> Result<bool, String> {
+    let enabled = std::env::var_os("LOCALAPPDATA").is_some_and(|root| {
+        std::path::PathBuf::from(root).join("Orbit Noir Shelf").join("orbit-glass").is_file()
+    });
+    #[cfg(windows)]
+    if sidecar::is_sidecar_label(window.label()) && previous != Some(enabled) {
+        sidecar::set_wallpaper_blur(&window, enabled)?;
+    }
+    Ok(enabled)
+}
+
+/// The current wallpaper scene's accent colour, when "scene accents" is switched on in Orbit.
+/// The scene comes from the state the Command Palette Dock extension publishes; the colours come
+/// from the shared orbit-commands.json. Any missing piece simply means "no accent".
+#[tauri::command]
+fn orbit_scene_accent() -> Option<String> {
+    let local = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?);
+    let shelf = local.join("Orbit Noir Shelf");
+    if !shelf.join("scene-accents").is_file() {
+        return None;
+    }
+    let state = std::fs::read_dir(local.join("Packages"))
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("OrbitNoir.CommandPalette_"))
+        .map(|entry| entry.path().join("LocalCache/Local/Orbit Noir Shelf/wallpaper-state.json"))
+        .find(|path| path.is_file())?;
+    let state: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(state).ok()?).ok()?;
+    let commands: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(shelf.join("orbit-commands.json")).ok()?).ok()?;
+    let accent = commands["scenes"][state["Scene"].as_str()?]["accent"].as_str()?;
+    let valid = accent.len() == 7 && accent.starts_with('#') && accent[1..].chars().all(|c| c.is_ascii_hexdigit());
+    valid.then(|| accent.to_string())
+}
+
+#[tauri::command]
+fn open_orbit_panel(panel: String) -> Result<(), String> {
+    if !matches!(panel.as_str(), "instruments" | "scene") {
+        return Err("Unknown Orbit panel.".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let root = std::env::var_os("LOCALAPPDATA").ok_or("Local AppData is unavailable.")?;
+        let shelf = std::path::PathBuf::from(root).join("Orbit Noir Shelf");
+        // The Orbit host owns the shared verbs (orbit-commands.json); older installs only have the script.
+        let host = shelf.join("OrbitShelf.exe");
+        if host.is_file() && shelf.join("orbit-commands.json").is_file() {
+            std::process::Command::new(host)
+                .args(["panel", panel.as_str()])
+                .creation_flags(0x08000000)
+                .spawn()
+                .map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+        let controls = shelf.join("OrbitControls.ps1");
+        if !controls.is_file() {
+            return Err("Orbit desktop controls are not installed.".into());
+        }
+        let windows = std::env::var_os("SystemRoot").ok_or("Windows system folder is unavailable.")?;
+        let powershell = std::path::PathBuf::from(windows).join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        std::process::Command::new(powershell)
+            .args(["-NoProfile", "-NonInteractive", "-STA", "-File"])
+            .arg(controls)
+            .args(["-Panel", panel.as_str()])
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    Err("Orbit desktop controls require Windows.".into())
+}
+#[tauri::command]
 fn show_sidecar_menu(window: tauri::WebviewWindow) -> Result<(), String> {
-    if window.label() != sidecar::SIDECAR_LABEL {
+    if !sidecar::is_sidecar_label(window.label()) {
         return Err("the Sidecar menu is only available from the Sidecar".into());
     }
 
@@ -258,9 +332,11 @@ pub fn run() {
     tauri::Builder::default()
         // Tauri requires the single-instance plugin to be registered first.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            handle_second_instance(app, args);
+            let app = app.clone();
+            tauri::async_runtime::spawn_blocking(move || handle_second_instance(&app, args));
         }))
         .manage(AppState::default())
+        .manage(sidecar::DisplaySync::default())
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(
@@ -296,6 +372,9 @@ pub fn run() {
             hide_media_popover,
             toggle_sidecar,
             show_sidecar_menu,
+            open_orbit_panel,
+            orbit_scene_accent,
+            orbit_glass,
             quit_trace
         ])
         .setup(|app| {
@@ -379,9 +458,12 @@ pub fn run() {
                 }
             }
             "sidecar-reanchor" => {
-                if let Err(error) = sidecar::anchor(app) {
-                    eprintln!("[Trace] Failed to re-anchor Sidecar: {error}");
-                }
+                let app = app.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Err(error) = sidecar::anchor(&app) {
+                        eprintln!("[Trace] Failed to re-anchor Sidecar: {error}");
+                    }
+                });
             }
             "sidecar-autostart" => {
                 let manager = app.autolaunch();
@@ -402,16 +484,6 @@ pub fn run() {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.emit(MAIN_DISMISS_EVENT, ());
-                }
-            }
-            if window.label() == sidecar::SIDECAR_LABEL
-                && matches!(
-                    event,
-                    tauri::WindowEvent::ScaleFactorChanged { .. } | tauri::WindowEvent::Resized(_)
-                )
-            {
-                if let Err(error) = sidecar::anchor(window.app_handle()) {
-                    eprintln!("[Trace] Failed to re-anchor Sidecar after display change: {error}");
                 }
             }
         })

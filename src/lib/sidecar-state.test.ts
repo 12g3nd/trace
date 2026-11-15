@@ -19,26 +19,24 @@ describe('Sidecar bay state', () => {
     expect(isLauncherRunning('localsend', { ...state, localsendRunning: true })).toBe(true);
   });
 
-  it('cycles forward and backward through all four bays', () => {
-    expect(cycleSidecarBay('trace', 1)).toBe('media');
-    expect(cycleSidecarBay('media', 1)).toBe('load');
-    expect(cycleSidecarBay('load', 1)).toBe('localsend');
-    expect(cycleSidecarBay('localsend', 1)).toBe('trace');
-    expect(cycleSidecarBay('trace', -1)).toBe('localsend');
-    expect(cycleSidecarBay('localsend', -1)).toBe('load');
-    expect(cycleSidecarBay('load', -1)).toBe('media');
-    expect(cycleSidecarBay('media', -1)).toBe('trace');
+  it('cycles through Trace, Instruments, and Scene in both directions', () => {
+    expect(cycleSidecarBay('trace', 1)).toBe('instruments');
+    expect(cycleSidecarBay('instruments', 1)).toBe('scene');
+    expect(cycleSidecarBay('scene', 1)).toBe('trace');
+    expect(cycleSidecarBay('trace', -1)).toBe('scene');
+    expect(cycleSidecarBay('scene', -1)).toBe('instruments');
+    expect(cycleSidecarBay('instruments', -1)).toBe('trace');
   });
 
   it('keeps cycling deterministically across repeated navigation', () => {
     let forward: SidecarBay = 'trace';
-    for (let index = 0; index < 40; index += 1) {
+    for (let index = 0; index < 42; index += 1) {
       forward = cycleSidecarBay(forward, 1);
     }
     expect(forward).toBe('trace');
 
     let backward: SidecarBay = 'trace';
-    for (let index = 0; index < 40; index += 1) {
+    for (let index = 0; index < 42; index += 1) {
       backward = cycleSidecarBay(backward, -1);
     }
     expect(backward).toBe('trace');
@@ -51,14 +49,18 @@ describe('Sidecar bay state', () => {
       setItem: (key: string, value: string) => values.set(key, value),
     };
 
-    saveSidecarBay(storage, 'load');
-    expect(values.get(SIDECAR_BAY_STORAGE_KEY)).toBe('load');
-    expect(loadSidecarBay(storage)).toBe('load');
+    saveSidecarBay(storage, 'scene');
+    expect(values.get(SIDECAR_BAY_STORAGE_KEY)).toBe('scene');
+    expect(loadSidecarBay(storage)).toBe('scene');
 
-    saveSidecarBay(storage, 'localsend');
-    expect(values.get(SIDECAR_BAY_STORAGE_KEY)).toBe('localsend');
-    expect(loadSidecarBay(storage)).toBe('localsend');
+    saveSidecarBay(storage, 'instruments');
+    expect(values.get(SIDECAR_BAY_STORAGE_KEY)).toBe('instruments');
+    expect(loadSidecarBay(storage)).toBe('instruments');
 
+    for (const retired of ['media', 'load', 'localsend', 'atlas']) {
+      values.set(SIDECAR_BAY_STORAGE_KEY, retired);
+      expect(loadSidecarBay(storage)).toBe('trace');
+    }
     values.set(SIDECAR_BAY_STORAGE_KEY, 'retired-bay');
     expect(loadSidecarBay(storage)).toBe('trace');
   });

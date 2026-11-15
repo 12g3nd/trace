@@ -17,6 +17,7 @@
     remove,
     move,
     reorder,
+    refresh,
     visibleTasks,
     nowTasks,
     laterTasks,
@@ -55,6 +56,7 @@
     const unlisteners: (() => void)[] = [];
     listen('summon', async () => {
       await flushPendingTaskEdits();
+      await refresh();
       clearSelection();
       searchActive.set(false);
       commandPaletteActive = false;

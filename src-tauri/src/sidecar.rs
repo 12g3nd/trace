@@ -6,7 +6,9 @@ use std::{
     sync::Mutex,
 };
 
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition};
+use tauri::{
+    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewWindowBuilder,
+};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -14,6 +16,8 @@ use std::os::windows::process::CommandExt;
 use windows::core::{w, BOOL};
 #[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+#[cfg(windows)]
+use windows::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST};
 #[cfg(windows)]
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
@@ -27,10 +31,10 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 use windows::Win32::UI::Shell::{ITaskbarList, TaskbarList};
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, FindWindowW, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowThreadProcessId,
-    IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_BOTTOM, HWND_TOPMOST,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_APPWINDOW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+    EnumWindows, FindWindowExW, FindWindowW, GetWindowLongPtrW, GetWindowTextLengthW,
+    GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE,
+    HWND_BOTTOM, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 
 pub const SIDECAR_LABEL: &str = "sidecar";
@@ -96,6 +100,7 @@ impl LauncherRegistry {
             "claude" => Some(CLAUDE_PROCESS_NAME),
             "gemini" => Some(GEMINI_PROCESS_NAME),
             "localsend" => Some(LOCALSEND_PROCESS_NAME),
+            "atlas" => Some("personal-atlas.exe"),
             _ => None,
         } {
             if crate::media::focus_running_executable(executable).is_ok() {
@@ -132,6 +137,18 @@ fn discover_launchers() -> HashMap<String, LaunchTarget> {
 
     if let Some(path) = discover_localsend_executable() {
         targets.insert("localsend".into(), LaunchTarget::Executable(path));
+    }
+
+    if let Some(root) = env::var_os("USERPROFILE") {
+        let path = Path::new(&root)
+            .join("Personal Atlas")
+            .join("src-tauri")
+            .join("target")
+            .join("release")
+            .join("personal-atlas.exe");
+        if path.is_file() {
+            targets.insert("atlas".into(), LaunchTarget::Executable(path));
+        }
     }
 
     targets.insert("codex".into(), LaunchTarget::AppId(CODEX_APP_ID.into()));
@@ -185,44 +202,233 @@ fn configure_background_command(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW);
 }
 
-pub fn anchor(app: &AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window(SIDECAR_LABEL)
-        .ok_or_else(|| "sidecar window is unavailable".to_string())?;
-    window
-        .set_size(LogicalSize::new(
-            SIDECAR_WIDTH_LOGICAL as f64,
-            SIDECAR_HEIGHT_LOGICAL as f64,
-        ))
-        .map_err(|error| error.to_string())?;
-    let monitor = window
-        .primary_monitor()
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "primary monitor is unavailable".to_string())?;
-    let window_size = window.outer_size().map_err(|error| error.to_string())?;
-    // Monitor position/size are the physical full bounds. Deliberately do not
-    // use work_area(): the Orbit Rail occupies the physical bottom screen band.
-    let monitor_position = monitor.position();
-    let monitor_size = monitor.size();
-    let scale = monitor.scale_factor();
-    let left_margin = (LEFT_MARGIN_LOGICAL as f64 * scale).round() as i32;
-    let bottom_margin = (BOTTOM_MARGIN_LOGICAL as f64 * scale).round() as i32;
-    let (x, y) = anchored_position(
-        monitor_position.x,
-        monitor_position.y,
-        monitor_size.width,
-        monitor_size.height,
-        window_size.width,
-        window_size.height,
-        left_margin,
-        bottom_margin,
-    );
+#[derive(Default)]
+pub struct DisplaySync(Mutex<()>);
 
-    window
-        .set_position(PhysicalPosition::new(x, y))
+pub fn is_sidecar_label(label: &str) -> bool {
+    label == SIDECAR_LABEL
+        || label.strip_prefix("sidecar-").is_some_and(|suffix| {
+            !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
+#[cfg(windows)]
+pub fn set_wallpaper_blur(window: &tauri::WebviewWindow, enabled: bool) -> Result<(), String> {
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    struct AccentPolicy {
+        state: i32,
+        flags: i32,
+        gradient_color: u32,
+        animation_id: i32,
+    }
+
+    #[repr(C)]
+    struct CompositionAttribute {
+        attribute: i32,
+        data: *const c_void,
+        size: usize,
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(hwnd: HWND, attribute: u32, value: *const c_void, size: u32) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetModuleHandleW(module_name: *const u16) -> *mut c_void;
+        fn GetProcAddress(module: *mut c_void, procedure_name: *const u8) -> *const c_void;
+    }
+
+    const WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const ROUND_CORNERS: i32 = 2;
+    const SYSTEM_BACKDROP_TYPE: u32 = 38;
+    const NO_SYSTEM_BACKDROP: i32 = 1;
+    const ACCENT_POLICY: i32 = 19;
+    const ACRYLIC_BLUR_BEHIND: i32 = 4;
+    const ACRYLIC_NAVY: u32 = 0x281F_140C; // Alpha, blue, green, red.
+    const INVALID_ARGUMENT: i32 = 0x8007_0057u32 as i32;
+
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?;
+    let policy = AccentPolicy {
+        state: if enabled { ACRYLIC_BLUR_BEHIND } else { 0 },
+        flags: 0,
+        gradient_color: ACRYLIC_NAVY,
+        animation_id: 0,
+    };
+    let attribute = CompositionAttribute {
+        attribute: ACCENT_POLICY,
+        data: (&policy as *const AccentPolicy).cast(),
+        size: std::mem::size_of::<AccentPolicy>(),
+    };
+
+    unsafe {
+        // Windows may paint the system Acrylic material as opaque on this always-on-top
+        // WebView window. The accent policy samples the scene behind it instead.
+        let user32 = GetModuleHandleW(w!("user32.dll").as_ptr());
+        if user32.is_null() {
+            return Err("Windows composition is unavailable.".into());
+        }
+        let address = GetProcAddress(user32, b"SetWindowCompositionAttribute\0".as_ptr());
+        if address.is_null() {
+            return Err("Windows accent blur is unavailable.".into());
+        }
+        let set_accent: unsafe extern "system" fn(HWND, *const CompositionAttribute) -> BOOL =
+            std::mem::transmute(address);
+        let result = DwmSetWindowAttribute(
+            hwnd,
+            SYSTEM_BACKDROP_TYPE,
+            (&NO_SYSTEM_BACKDROP as *const i32).cast(),
+            std::mem::size_of::<i32>() as u32,
+        );
+        if result < 0 && result != INVALID_ARGUMENT {
+            return Err(format!("Could not clear the system backdrop ({result:#x})."));
+        }
+        // The Acrylic layer ignores GDI window regions. Let the compositor round its own
+        // backdrop and keep the transparent WebView at the same radius.
+        let corner_result = DwmSetWindowAttribute(
+            hwnd,
+            WINDOW_CORNER_PREFERENCE,
+            (&ROUND_CORNERS as *const i32).cast(),
+            std::mem::size_of::<i32>() as u32,
+        );
+        if corner_result < 0 && corner_result != INVALID_ARGUMENT {
+            return Err(format!("Could not round the TRACE backdrop ({corner_result:#x})."));
+        }
+        if !set_accent(hwnd, &attribute).as_bool() {
+            return Err("Windows did not apply the TRACE accent policy.".into());
+        }
+    }
+    Ok(())
+}
+
+// Keep the configured window on the primary display. Additional windows reuse
+// the same hidden, transparent configuration and receive only shell permissions.
+fn display_monitors(app: &AppHandle) -> Result<Vec<tauri::Monitor>, String> {
+    let primary = app.primary_monitor().map_err(|error| error.to_string())?;
+    let mut monitors = app
+        .available_monitors()
         .map_err(|error| error.to_string())?;
-    anchor_visible_media_popover(app)?;
-    ensure_taskbar_z_order(&window)
+    monitors.sort_by_key(|monitor| {
+        let position = monitor.position();
+        let is_primary = primary.as_ref().is_some_and(|primary| {
+            primary.position() == position && primary.size() == monitor.size()
+        });
+        (!is_primary, position.x, position.y)
+    });
+    // Mirrored displays share one desktop rectangle and need only one Sidecar.
+    monitors.dedup_by(|a, b| a.position() == b.position() && a.size() == b.size());
+    Ok(monitors)
+}
+
+fn sidecar_label(index: usize) -> String {
+    if index == 0 {
+        SIDECAR_LABEL.into()
+    } else {
+        format!("sidecar-{index}")
+    }
+}
+
+pub fn anchor(app: &AppHandle) -> Result<(), String> {
+    let sync = app.state::<DisplaySync>();
+    let _guard = match sync.0.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    let monitors = display_monitors(app)?;
+    if monitors.is_empty() {
+        return Ok(()); // Display enumeration can be empty briefly while docking.
+    }
+    let visible = app
+        .get_webview_window(SIDECAR_LABEL)
+        .is_some_and(|window| window.is_visible().unwrap_or(false));
+    for (index, monitor) in monitors.iter().enumerate() {
+        let label = sidecar_label(index);
+        let window = match app.get_webview_window(&label) {
+            Some(window) => window,
+            None => {
+                let mut config = app
+                    .config()
+                    .app
+                    .windows
+                    .iter()
+                    .find(|config| config.label == SIDECAR_LABEL)
+                    .ok_or_else(|| "sidecar configuration is unavailable".to_string())?
+                    .clone();
+                config.label = label;
+                let window = WebviewWindowBuilder::from_config(app, &config)
+                    .map_err(|error| error.to_string())?
+                    .build()
+                    .map_err(|error| error.to_string())?;
+                apply_tool_window_style(&window)?;
+                window
+            }
+        };
+        anchor_window(&window, monitor)?;
+        if window.is_visible().map_err(|error| error.to_string())? != visible {
+            if visible {
+                window.show().map_err(|error| error.to_string())?;
+            } else {
+                window.hide().map_err(|error| error.to_string())?;
+            }
+        }
+        ensure_taskbar_z_order(&window)?;
+    }
+    // Remove disconnected displays instead of leaving invisible windows running.
+    for (label, window) in app.webview_windows() {
+        if is_sidecar_label(&label)
+            && !(0..monitors.len()).any(|index| sidecar_label(index) == label)
+        {
+            window.destroy().map_err(|error| error.to_string())?;
+        }
+    }
+    anchor_visible_media_popover(app)
+}
+
+fn sidecar_geometry(
+    screen_x: i32,
+    screen_y: i32,
+    screen_width: u32,
+    screen_height: u32,
+    scale: f64,
+) -> (PhysicalPosition<i32>, PhysicalSize<u32>) {
+    let size = PhysicalSize::new(
+        (SIDECAR_WIDTH_LOGICAL as f64 * scale).round() as u32,
+        (SIDECAR_HEIGHT_LOGICAL as f64 * scale).round() as u32,
+    );
+    let (x, y) = anchored_position(
+        screen_x,
+        screen_y,
+        screen_width,
+        screen_height,
+        size.width,
+        size.height,
+        (LEFT_MARGIN_LOGICAL as f64 * scale).round() as i32,
+        (BOTTOM_MARGIN_LOGICAL as f64 * scale).round() as i32,
+    );
+    (PhysicalPosition::new(x, y), size)
+}
+
+fn anchor_window(window: &tauri::WebviewWindow, monitor: &tauri::Monitor) -> Result<(), String> {
+    let (target, size) = sidecar_geometry(
+        monitor.position().x,
+        monitor.position().y,
+        monitor.size().width,
+        monitor.size().height,
+        monitor.scale_factor(),
+    );
+    if window.outer_position().map_err(|error| error.to_string())? != target {
+        window
+            .set_position(target)
+            .map_err(|error| error.to_string())?;
+    }
+    if window.outer_size().map_err(|error| error.to_string())? != size {
+        window.set_size(size).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn anchor_visible_media_popover(app: &AppHandle) -> Result<(), String> {
@@ -256,7 +462,7 @@ fn anchor_media_popover(app: &AppHandle) -> Result<(), String> {
     let scale = sidecar.scale_factor().map_err(|error| error.to_string())?;
     let gap = (MEDIA_POPOVER_GAP_LOGICAL as f64 * scale).round() as i32;
     let screen_top = sidecar
-        .primary_monitor()
+        .current_monitor()
         .map_err(|error| error.to_string())?
         .map(|monitor| monitor.position().y)
         .unwrap_or(i32::MIN);
@@ -275,20 +481,23 @@ fn anchor_media_popover(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn show(app: &AppHandle) -> Result<(), String> {
-    let window = app
+    let primary = app
         .get_webview_window(SIDECAR_LABEL)
         .ok_or_else(|| "sidecar window is unavailable".to_string())?;
-
-    // Reapplying SWP_FRAMECHANGED to an already-visible WebView can remove its
-    // native surface. Re-anchor is the idempotent restore path for repeat launches.
-    if window.is_visible().map_err(|error| error.to_string())? {
-        return anchor(app);
+    // Do not reapply SWP_FRAMECHANGED to an already-visible WebView.
+    if !primary.is_visible().map_err(|error| error.to_string())? {
+        apply_tool_window_style(&primary)?;
     }
-
-    apply_tool_window_style(&window)?;
     anchor(app)?;
-    window.show().map_err(|error| error.to_string())?;
-    ensure_taskbar_z_order(&window)
+    for (label, window) in app.webview_windows() {
+        if is_sidecar_label(&label) {
+            if !window.is_visible().map_err(|error| error.to_string())? {
+                window.show().map_err(|error| error.to_string())?;
+            }
+            ensure_taskbar_z_order(&window)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn show_media_popover(app: &AppHandle) -> Result<(), String> {
@@ -321,7 +530,22 @@ fn ensure_taskbar_z_order(window: &tauri::WebviewWindow) -> Result<(), String> {
         // Explorer drops its topmost flag for full-screen apps. Follow that
         // layer instead of unconditionally demoting Sidecar behind normal apps.
         // Default to topmost while Explorer is restarting.
-        let topmost = FindWindowW(w!("Shell_TrayWnd"), None)
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        let primary = FindWindowW(w!("Shell_TrayWnd"), None).ok();
+        let mut taskbar = primary
+            .filter(|taskbar| MonitorFromWindow(*taskbar, MONITOR_DEFAULTTONEAREST) == monitor);
+        let mut previous = None;
+        while taskbar.is_none() {
+            let Ok(secondary) = FindWindowExW(None, previous, w!("Shell_SecondaryTrayWnd"), None)
+            else {
+                break;
+            };
+            if MonitorFromWindow(secondary, MONITOR_DEFAULTTONEAREST) == monitor {
+                taskbar = Some(secondary);
+            }
+            previous = Some(secondary);
+        }
+        let topmost = taskbar
             .map(|taskbar| GetWindowLongPtrW(taskbar, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0)
             .unwrap_or(true);
         sync_taskbar_layer(hwnd, topmost)
@@ -370,20 +594,16 @@ pub fn watch_taskbar_layer(app: AppHandle) -> Result<(), String> {
             if app.get_webview_window(SIDECAR_LABEL).is_none() {
                 break;
             }
-            let handle = app.clone();
-            if app
-                .run_on_main_thread(move || {
-                    for label in [SIDECAR_LABEL, MEDIA_POPOVER_LABEL] {
-                        if let Some(window) = handle.get_webview_window(label) {
-                            if let Err(error) = ensure_taskbar_z_order(&window) {
-                                eprintln!("[Trace] Could not sync {label} taskbar layer: {error}");
-                            }
-                        }
-                    }
-                })
-                .is_err()
-            {
-                break;
+            // WebView2 window creation must run outside synchronous commands
+            // and native event handlers. Keep display reconciliation on this
+            // worker; Tauri marshals individual window operations as needed.
+            if let Err(error) = anchor(&app) {
+                eprintln!("[Trace] Could not sync display Sidecars: {error}");
+            }
+            if let Some(window) = app.get_webview_window(MEDIA_POPOVER_LABEL) {
+                if let Err(error) = ensure_taskbar_z_order(&window) {
+                    eprintln!("[Trace] Could not sync media taskbar layer: {error}");
+                }
             }
         })
         .map(|_| ())
@@ -608,7 +828,11 @@ pub fn toggle(app: &AppHandle) -> Result<bool, String> {
 
     if window.is_visible().map_err(|error| error.to_string())? {
         let _ = hide_media_popover(app);
-        window.hide().map_err(|error| error.to_string())?;
+        for (label, window) in app.webview_windows() {
+            if is_sidecar_label(&label) {
+                window.hide().map_err(|error| error.to_string())?;
+            }
+        }
         Ok(false)
     } else {
         show(app)?;
@@ -652,6 +876,22 @@ fn media_popover_position(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mixed_dpi_displays_use_their_own_physical_size_and_desktop_origin() {
+        use tauri::{PhysicalPosition, PhysicalSize};
+        assert_eq!(
+            super::sidecar_geometry(0, 0, 1920, 1080, 1.0),
+            (PhysicalPosition::new(5, 1032), PhysicalSize::new(317, 48)),
+        );
+        assert_eq!(
+            super::sidecar_geometry(-1920, 80, 1920, 1200, 1.5),
+            (
+                PhysicalPosition::new(-1912, 1208),
+                PhysicalSize::new(476, 72)
+            ),
+        );
+    }
+
     #[test]
     fn only_open_windows_light_launchers_even_if_background_processes_remain() {
         let processes = std::collections::HashMap::from([

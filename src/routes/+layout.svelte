@@ -30,7 +30,9 @@
   onMount(() => {
     try {
       const label = getCurrentWindow().label;
-      windowKind = label === 'sidecar' || label === 'media-popover' ? label : 'main';
+      windowKind = /^sidecar(?:-[0-9]+)?$/.test(label)
+        ? 'sidecar'
+        : label === 'media-popover' ? 'media-popover' : 'main';
     } catch {
       // Browser development always renders the main Trace application.
       windowKind = 'main';

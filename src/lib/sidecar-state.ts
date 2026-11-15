@@ -1,4 +1,4 @@
-export const SIDECAR_BAYS = ['trace', 'media', 'load', 'localsend'] as const;
+export const SIDECAR_BAYS = ['trace', 'instruments', 'scene'] as const;
 export type SidecarBay = (typeof SIDECAR_BAYS)[number];
 export const SIDECAR_LAUNCHERS = ['localsend', 'codex', 'claude', 'gemini'] as const;
 export type SidecarLauncher = (typeof SIDECAR_LAUNCHERS)[number];

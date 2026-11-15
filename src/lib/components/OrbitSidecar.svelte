@@ -1,20 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
   import chatgptIcon from '../../assets/orbit/chatgpt.svg';
   import claudeIcon from '../../assets/orbit/claude.svg';
   import geminiIcon from '../../assets/orbit/gemini.png';
-  import localSendIcon from '../../assets/orbit/localsend.svg';
-  import { MediaPopoverIntent } from '$lib/media-popover-intent';
   import {
-    EMPTY_MEDIA,
-    MEDIA_POPOVER_HOVER_EVENT,
-    MEDIA_REFRESH_EVENT,
-    MEDIA_STATE_EVENT,
-    type MediaState,
-  } from '$lib/media-state';
-  import {
+    SIDECAR_BAY_STORAGE_KEY,
     cycleSidecarBay,
     isLauncherRunning,
     loadSidecarBay,
@@ -26,35 +17,19 @@
 
   type Launcher = SidecarLauncher;
 
-  interface LoadState {
-    memoryUsedGib: number;
-    memoryTotalGib: number;
-    cpuPercent: number;
-  }
 
   let bay: SidecarBay = 'trace';
+  let glass = false;
+  /** The wallpaper scene's accent (#rrggbb), or '' when scene accents are off in Orbit. */
+  let sceneAccent = '';
+  let appliedMaterial: boolean | null = null;
   let unavailableLaunchers: Launcher[] = [];
   let launching: Launcher[] = [];
   let launcherRefreshInFlight = false;
   let launcherState: SidecarLauncherState = { codexRunning: false, claudeRunning: false, geminiRunning: false, localsendRunning: false };
-  let media = EMPTY_MEDIA;
-  let load: LoadState | null = null;
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   let tick = 0;
-  let mediaRefreshInFlight = false;
-  let loadRefreshInFlight = false;
-  let hoverIntent: MediaPopoverIntent | undefined;
-  let unlistenPopoverHover: UnlistenFn | undefined;
-  let unlistenMediaRefresh: UnlistenFn | undefined;
   let disposed = false;
-
-  $: mediaLabel = media.available
-    ? media.title.trim() || media.artist.trim() || 'UNTITLED'
-    : 'NO MEDIA';
-  $: mediaTooltip = [media.title, media.artist].filter(Boolean).join(' — ') || 'No active media session';
-  $: loadTooltip = load
-    ? `Memory ${load.memoryUsedGib.toFixed(1)} of ${load.memoryTotalGib.toFixed(1)} GiB; CPU ${Math.round(load.cpuPercent)} percent`
-    : 'System load is initializing';
 
   onMount(() => {
     document.documentElement.classList.add('shell-document');
@@ -64,103 +39,42 @@
       bay = 'trace';
     }
 
-    hoverIntent = new MediaPopoverIntent({
-      show: () => void showMediaPopover(),
-      hide: () => void hideMediaPopover(),
-    });
-    hoverIntent.setContext(bay === 'media', media.available);
-
-    void listen<boolean>(MEDIA_POPOVER_HOVER_EVENT, (event) => {
-      hoverIntent?.setPopoverHovered(event.payload);
-    })
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else unlistenPopoverHover = unlisten;
-      })
-      .catch((error) => console.warn('[Trace Sidecar] Could not subscribe to popover hover:', error));
-    void listen(MEDIA_REFRESH_EVENT, () => void refreshMedia())
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else unlistenMediaRefresh = unlisten;
-      })
-      .catch((error) => console.warn('[Trace Sidecar] Could not subscribe to media refresh:', error));
-
-    if (bay === 'media') void refreshMedia();
-    if (bay === 'load') void refreshLoad();
+    function syncBay(event: StorageEvent) {
+      if (event.key === SIDECAR_BAY_STORAGE_KEY || event.key === null) {
+        try { bay = loadSidecarBay(localStorage); } catch { bay = 'trace'; }
+      }
+    }
+    window.addEventListener('storage', syncBay);
     void refreshLauncherState();
+    void refreshMaterial();
 
     pollTimer = setInterval(() => {
       tick += 1;
-      if (bay === 'media') void refreshMedia();
-      if (bay === 'load' && tick % 2 === 0) void refreshLoad();
       void refreshLauncherState();
+      if (tick % 3 === 0) void refreshMaterial();
       if (tick % 15 === 0) void refreshAnchor();
     }, 1000);
 
     return () => {
       disposed = true;
-      hoverIntent?.destroy();
-      unlistenPopoverHover?.();
-      unlistenMediaRefresh?.();
+      window.removeEventListener('storage', syncBay);
       document.documentElement.classList.remove('shell-document');
       if (pollTimer) clearInterval(pollTimer);
     };
   });
 
-  async function refreshMedia() {
-    if (mediaRefreshInFlight) return;
-    mediaRefreshInFlight = true;
+  async function refreshMaterial() {
     try {
-      const next = await invoke<MediaState>('get_media_state', { artworkKey: media.artworkKey });
-      if (next.artworkKey === media.artworkKey && !next.artwork && media.artwork) {
-        next.artwork = media.artwork;
-      }
-      media = next;
-    } catch (error) {
-      console.warn('[Trace Sidecar] Could not read Windows media state:', error);
-      media = EMPTY_MEDIA;
-    } finally {
-      mediaRefreshInFlight = false;
-      hoverIntent?.setContext(bay === 'media', media.available);
-      void publishMediaState();
+      const enabled = await invoke<boolean>('orbit_glass', { previous: appliedMaterial });
+      if (!disposed) appliedMaterial = glass = enabled;
+    } catch {
+      if (!disposed) glass = false;
     }
-  }
-
-  async function publishMediaState() {
     try {
-      await emitTo('media-popover', MEDIA_STATE_EVENT, media);
-    } catch (error) {
-      console.warn('[Trace Sidecar] Could not publish media state:', error);
-    }
-  }
-
-  async function showMediaPopover() {
-    await publishMediaState();
-    try {
-      await invoke('show_media_popover');
-    } catch (error) {
-      console.warn('[Trace Sidecar] Could not show media popover:', error);
-    }
-  }
-
-  async function hideMediaPopover() {
-    try {
-      await invoke('hide_media_popover');
-    } catch (error) {
-      console.warn('[Trace Sidecar] Could not hide media popover:', error);
-    }
-  }
-
-  async function refreshLoad() {
-    if (loadRefreshInFlight || bay !== 'load') return;
-    loadRefreshInFlight = true;
-    try {
-      load = await invoke<LoadState>('get_load_state');
-    } catch (error) {
-      console.warn('[Trace Sidecar] Could not read system load:', error);
-      load = null;
-    } finally {
-      loadRefreshInFlight = false;
+      const accent = await invoke<string | null>('orbit_scene_accent');
+      if (!disposed) sceneAccent = accent ?? '';
+    } catch {
+      if (!disposed) sceneAccent = '';
     }
   }
 
@@ -215,14 +129,16 @@
     }
   }
 
-  async function openTaskManager() {
+  let panelError = '';
+
+  async function openOrbitPanel(panel: 'instruments' | 'scene') {
+    panelError = '';
     try {
-      await invoke('open_task_manager');
+      await invoke('open_orbit_panel', { panel });
     } catch (error) {
-      console.warn('[Trace Sidecar] Could not open Task Manager:', error);
+      panelError = String(error);
     }
   }
-
   async function openContextMenu() {
     try {
       await invoke('show_sidecar_menu');
@@ -238,9 +154,6 @@
     } catch {
       // A disabled webview storage preference should not affect the Sidecar.
     }
-    hoverIntent?.setContext(bay === 'media', media.available);
-    if (bay === 'media') void refreshMedia();
-    if (bay === 'load') void refreshLoad();
   }
 
   function handleWheel(event: WheelEvent) {
@@ -248,27 +161,13 @@
     selectBay(event.deltaY > 0 ? 1 : -1);
   }
 
-  async function openMediaSource() {
-    if (!media.available) return;
-    try {
-      await invoke('open_media_source');
-    } catch (error) {
-      console.warn('[Trace Sidecar] Could not activate media source:', error);
-    }
-  }
-
-  async function runMediaCommand(action: 'previous' | 'toggle' | 'next') {
-    try {
-      await invoke('media_command', { action });
-      setTimeout(refreshMedia, 120);
-    } catch (error) {
-      console.warn(`[Trace Sidecar] Media command ${action} failed:`, error);
-    }
-  }
 </script>
 
 <main
   class="sidecar-shell"
+  class:glass
+  class:accented={sceneAccent !== ''}
+  style:--scene-accent={sceneAccent || null}
   aria-label="Orbit Sidecar"
   on:contextmenu|preventDefault={openContextMenu}
 >
@@ -334,78 +233,9 @@
                 <path d="M9 4v10M4 9h10" />
               </svg>
             </button>
-          {:else if bay === 'media'}
-            <div
-              class="media-bay"
-              class:source-available={media.available}
-              role="group"
-              aria-label="Compact media controls"
-              title={mediaTooltip}
-              on:mouseenter={() => hoverIntent?.setCompactHovered(true)}
-              on:mouseleave={() => hoverIntent?.setCompactHovered(false)}
-            >
-              <button
-                class="compact-source"
-                tabindex="-1"
-                disabled={!media.available}
-                aria-label={media.available ? 'Open current media source' : 'No active media session'}
-                on:click={openMediaSource}
-              ></button>
-              {#if media.artwork}
-                <img class="artwork" src={media.artwork} alt="" />
-              {:else}
-                <div class="artwork artwork-fallback" aria-hidden="true">
-                  <svg viewBox="0 0 20 20"><path d="M8 14.2V5.4l7-1.5v8.5M8 14.2c0 1-1.1 1.8-2.4 1.8s-2.4-.8-2.4-1.8 1.1-1.8 2.4-1.8 2.4.8 2.4 1.8Zm7-1.8c0 1-1.1 1.8-2.4 1.8s-2.4-.8-2.4-1.8 1.1-1.8 2.4-1.8 2.4.8 2.4 1.8Z" /></svg>
-                </div>
-              {/if}
-              <span class:idle={!media.available} class="media-title">{mediaLabel}</span>
-              <button
-                class="media-btn"
-                disabled={!media.available || !media.canToggle}
-                title={media.playing ? 'Pause' : 'Play'}
-                aria-label={media.playing ? 'Pause current media' : 'Play current media'}
-                on:click|stopPropagation={() => runMediaCommand('toggle')}
-              >
-                {#if media.playing}
-                  <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M6 5v8M12 5v8" /></svg>
-                {:else}
-                  <svg viewBox="0 0 18 18" aria-hidden="true"><path class="fill" d="m6.5 4.8 7 4.2-7 4.2z" /></svg>
-                {/if}
-              </button>
-              <button
-                class="media-btn"
-                disabled={!media.available || !media.canNext}
-                title="Next"
-                aria-label="Next media track"
-                on:click|stopPropagation={() => runMediaCommand('next')}
-              >
-                <svg viewBox="0 0 18 18" aria-hidden="true">
-                  <path class="fill" d="m5 5 6 4-6 4z" />
-                  <path d="M12.5 5v8" />
-                </svg>
-              </button>
-            </div>
-          {:else if bay === 'load'}
-            <button class="load-bay" title={loadTooltip} aria-label={`${loadTooltip}; open Task Manager`} on:click={openTaskManager}>
-              {#if load}
-                <span><strong>MEM</strong> {load.memoryUsedGib.toFixed(1)}/{load.memoryTotalGib.toFixed(1)}G</span>
-                <span><strong>CPU</strong> {Math.round(load.cpuPercent)}%</span>
-              {:else}
-                <span class="bay-label">LOAD</span>
-                <span class="load-pending">INITIALIZING</span>
-              {/if}
-            </button>
-          {:else if bay === 'localsend'}
-            <button
-              class="localsend-door"
-              class:running={isLauncherRunning('localsend', launcherState)}
-              disabled={!launcherEnabled('localsend')}
-              title={launcherTitle('localsend', 'LocalSend')}
-              aria-label={launcherTitle('localsend', 'LocalSend')}
-              on:click={() => openLauncher('localsend')}
-            >
-              <img class="launcher-icon" src={localSendIcon} alt="" />
-              <span class="localsend-label">LocalSend</span>
+          {:else}
+            <button class="trace-door" title={panelError || (bay === 'scene' ? 'Wallpaper and Gallery controls' : 'Open the Lake Ontario Listening Station')} on:click={() => openOrbitPanel(bay === 'scene' ? 'scene' : 'instruments')}>
+              <span class="bay-label">{bay === 'scene' ? 'SCENE' : 'INSTRUMENTS'}</span>
             </button>
           {/if}
         </div>
@@ -437,6 +267,12 @@
     border: 1px solid rgba(127, 166, 196, 0.17);
     border-radius: 10px;
     user-select: none;
+    --mark: var(--on-accent);
+  }
+
+  /* Scene accents: the capture mark and the open-app halo follow the wallpaper. */
+  .sidecar-shell.accented {
+    --mark: var(--scene-accent);
   }
 
   .launcher-group {
@@ -468,18 +304,21 @@
     background: rgba(232, 239, 245, 0.08);
   }
 
-  .launcher-btn.running,
-  .localsend-door.running {
+  .launcher-btn.running {
     background: rgba(42, 148, 226, 0.22);
     box-shadow: 0 0 8px rgba(74, 191, 255, 0.34);
+  }
+
+  .sidecar-shell.accented .launcher-btn.running {
+    background: color-mix(in srgb, var(--scene-accent) 22%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--scene-accent) 34%, transparent);
   }
 
   .launcher-btn.running .launcher-icon {
     transform: scale(1.08);
   }
 
-  .launcher-btn:disabled,
-  .localsend-door:disabled {
+  .launcher-btn:disabled {
     opacity: 0.3;
   }
 
@@ -572,9 +411,7 @@
     animation: bay-in 170ms var(--on-ease);
   }
 
-  .trace-door,
-  .localsend-door,
-  .load-bay {
+  .trace-door {
     width: 100%;
     height: 38px;
     display: flex;
@@ -588,174 +425,30 @@
   }
 
   .trace-door:hover,
-  .trace-door:focus-visible,
-  .localsend-door:hover:not(:disabled),
-  .localsend-door:focus-visible,
-  .load-bay:hover,
-  .load-bay:focus-visible {
+  .trace-door:focus-visible {
     color: var(--on-text);
     background: rgba(16, 42, 76, 0.62);
   }
 
-  .bay-label {
-    font-family: var(--on-font-graphic);
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.11em;
+  .sidecar-shell.glass {
+    background: rgba(16, 29, 54, 0.52);
+    border-radius: 8px;
   }
 
-  .localsend-label {
+  .bay-label {
     font-family: var(--on-font-interface);
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 600;
+    letter-spacing: 0.035em;
   }
 
   .open-icon {
     width: 14px;
     height: 14px;
     fill: none;
-    stroke: var(--on-accent);
+    stroke: var(--mark);
     stroke-width: 1.5;
     stroke-linecap: round;
-  }
-
-  .media-bay {
-    position: relative;
-    width: 100%;
-    height: 38px;
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    min-width: 0;
-  }
-
-  .media-bay.source-available {
-    cursor: pointer;
-  }
-
-  .compact-source {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    width: 100%;
-    height: 100%;
-    padding: 0;
-    border-radius: 8px;
-    cursor: pointer;
-  }
-
-  .compact-source:disabled {
-    cursor: default;
-  }
-
-  .artwork {
-    position: relative;
-    z-index: 2;
-    width: 24px;
-    height: 24px;
-    flex: 0 0 24px;
-    border-radius: 5px;
-    object-fit: cover;
-    background: var(--on-surface-raised);
-    pointer-events: none;
-  }
-
-  .artwork-fallback {
-    display: grid;
-    place-items: center;
-    color: var(--on-text-quiet);
-  }
-
-  .artwork-fallback svg {
-    width: 15px;
-    height: 15px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.25;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .media-title {
-    position: relative;
-    z-index: 2;
-    min-width: 0;
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--on-font-interface);
-    font-size: 10px;
-    color: var(--on-text-secondary);
-  }
-
-  .media-title.idle {
-    font-family: var(--on-font-mono);
-    font-size: 9px;
-    letter-spacing: 0.04em;
-    color: var(--on-text-quiet);
-  }
-
-  .media-btn {
-    position: relative;
-    z-index: 3;
-    width: 20px;
-    height: 30px;
-    flex: 0 0 20px;
-    display: grid;
-    place-items: center;
-    padding: 0;
-    border-radius: 6px;
-    color: var(--on-text-secondary);
-    transition: color 150ms var(--on-ease), background 150ms var(--on-ease), opacity 150ms var(--on-ease);
-  }
-
-  .media-btn:hover:not(:disabled),
-  .media-btn:focus-visible {
-    color: var(--on-text);
-    background: rgba(232, 239, 245, 0.07);
-  }
-
-  .media-btn:disabled {
-    opacity: 0.25;
-  }
-
-  .media-btn svg {
-    width: 16px;
-    height: 16px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.4;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .media-btn .fill {
-    fill: currentColor;
-    stroke: none;
-  }
-
-  .load-bay {
-    justify-content: space-between;
-    gap: 5px;
-    padding: 0 2px;
-    font-family: var(--on-font-mono);
-    font-size: 8px;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
-
-  .load-bay strong {
-    color: var(--on-accent-secondary);
-    font-size: 8px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-  }
-
-  .load-pending {
-    color: var(--on-text-quiet);
-    font-size: 8px;
-    letter-spacing: 0.05em;
   }
 
   @keyframes bay-in {
@@ -776,10 +469,7 @@
 
     .launcher-btn,
     .nav-btn,
-    .trace-door,
-    .localsend-door,
-    .load-bay,
-    .media-btn {
+    .trace-door {
       transition: none;
     }
   }
